@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Portfolio Website</title>
+    <!-- GOOGLE FONT API-->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@100..900&display=swap" rel="stylesheet">                                                                      
+    
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="gallery-style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <div class="header">
+        <nav>
+            <h2 class="brand">My <span>Brand</span></h2>
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="about.html">About Me</a></li>
+                <li><a href="portfolio.html">Portfolio</a></li>
+            </ul>
+            <button type="button">Contact me</button>
+        </nav>
+        <div class="container">
+            <center><h1>Portfolio Page</h1></center>
+            <div class="gallery">
+              <img src="images/3.png" alt="Cinque Terre" class="gallery-item" onclick="openModal('modal1', 'Cinque Terre')">
+              <img src="images/4.png" alt="Forest" class="gallery-item" onclick="openModal('modal2', 'Forest')">
+              <img src="images/5.png" alt="Northern Lights" class="gallery-item" onclick="openModal('modal3', 'Nothern Lights')">
+              <img src="images/6.png" alt="Mountains" class="gallery-item" onclick="openModal('modal4', 'Mountains')">
+            </div>
+
+            <div id="modal1" class="modal">
+              <span class="close" onclick="closeModal('modal1')">&times;</span>
+              <img src="images/3.png" alt="Cinque Terre" class="modal-content">
+              <div class="caption"></div>
+            </div>
+
+            <div id="modal2" class="modal">
+              <span class="close" onclick="closeModal('modal2')">&times;</span>
+              <img src="images/4.png" alt="Forest" class="modal-content">
+              <div class="caption"></div>
+            </div>
+
+            <div id="modal3" class="modal">
+              <span class="close" onclick="closeModal('modal3')">&times;</span>
+              <img src="images/5.png" alt="Northern Lights" class="modal-content">
+              <div class="caption"></div>
+            </div>
+
+            <div id="modal4" class="modal">
+              <span class="close" onclick="closeModal('modal4')">&times;</span>
+              <img src="images/6.png" alt="Mountains" class="modal-content">
+              <div class="caption"></div>
+            </div>
+
+            <script>
+            function openModal(modalId, caption) {
+              let modal = document.getElementById(modalId);
+              modal.style.display = "flex";
+              modal.classList.add("show");
+              let message = modal.querySelector(".caption");
+              message.innerText = caption;
+            }
+
+            function closeModal(modalId) {
+              let modal = document.getElementById(modalId);
+              modal.classList.remove("show");
+              setTimeout(function () {
+                modal.style.display = "none";
+                modal.querySelector(".caption").innerText = "";
+              }, 300);
+            }
+            </script>
+            
+        </div>
+    </div>
+  <footer>
+    <div class="footer-container">
+
+      <div class="footer-column about">
+        <h3>About Us</h3>
+        <p>Short, concise description of your company or website. This is a good place to put a mission statement or a brief introduction.</p>
+        <div class="social-links">
+          <a href="#"><i class="fab fa-facebook-f"></i></a>
+          <a href="#"><i class="fab fa-twitter"></i></a>
+          <a href="#"><i class="fab fa-instagram"></i></a>
+        </div>
+      </div>
+
+      <div class="footer-column links">
+        <h3>Quick Links</h3>
+        <ul>
+          <li><a href="#">Home</a></li>
+          <li><a href="#">Services</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Contact</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-column contact">
+        <h3>Contact Info</h3>
+        <p><i class="fas fa-map-marker-alt"></i> 123 Main St, Anytown, USA</p>
+        <p><i class="fas fa-phone"></i> (555) 123-4567</p>
+        <p><i class="fas fa-envelope"></i> info@yourwebsite.com</p>
+      </div>
+      
+    </div>
+
+    <div class="footer-bottom">
+      <p>&copy; 2025 Your Company Name. All Rights Reserved.</p>
+    </div>
+  </footer>
+
+    
+</body>
+</html>
