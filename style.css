@@ -70,7 +70,9 @@ h1{
 }
 
 .container{
-    background-image: url("https://t3.ftcdn.net/jpg/10/23/94/68/360_F_1023946869_TID7KbKpSoPkS0TG8wQHeWH0QwNJBAGo.jpg");
+    background-image: url(https://wallpaperaccess.com/full/20458297.gif);
+    background-repeat: no-repeat;
+    background-size: cover;
     padding-top: 40px;
     min-height: 600px;
     max-height: 800px;
