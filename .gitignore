@@ -1,0 +1,19 @@
+# Local environment / secrets
+.env
+.env.*
+*.env
+
+# Local PHP configuration
+# Uncomment if config.php contains credentials/secrets
+api/config.php
+
+# XAMPP / local development
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VS Code local settings
+.vscode/
