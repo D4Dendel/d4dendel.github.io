@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dyndel Pino | Portfolio</title>
+    <link rel="icon" type="image/png" href="img/icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="home">
+    <header class="header">
+        <div class="nav-container">
+            <div class="logo-wrap">
+                <img src="img/icon.png" alt="Dyndel Pino logo">
+                <div class="brand">Dyndel <span>Pino</span></div>
+            </div>
+
+            <button class="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+
+            <nav class="nav" aria-label="Main navigation">
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="illustration.html">Illustration</a></li>
+                    <li><a href="portraits.html">Portraits</a></li>
+                    <li><a href="logos.html">Logos</a></li>
+                    <li><a href="graphic-design.html">Shop</a></li>
+                    <li><a href="#contact">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="page-shell">
+        <section class="hero reveal">
+            <div class="hero-copy">
+                <p class="eyebrow">Creative visual storyteller</p>
+                <h1>Art that turns<br><span class="typed-slot"><span class="typed-word" data-typed-words="ideas,portraits,brands,imagination" aria-live="polite">ideas</span></span><span class="hero-final-line">into unforgettable stories.</span></h1>
+                <p class="subtitle">
+                    I create playful illustration, expressive portrait work, bold branding, and thoughtful design systems for people and businesses that want their visuals to feel memorable and alive.
+                </p>
+
+                <div class="hero-actions">
+                    <a class="btn btn-primary contact-cta" href="#contact">Book a project</a>
+                    <a class="btn btn-secondary" href="#gallery">View portfolio</a>
+                </div>
+
+                <ul class="hero-stats" aria-label="Work statistics">
+                    <li>
+                        <strong>8+</strong>
+                        <span>Years</span>
+                    </li>
+                    <li>
+                        <strong>130</strong>
+                        <span>Projects</span>
+                    </li>
+                    <li>
+                        <strong>96%</strong>
+                        <span>Repeat clients</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="hero-visual" aria-label="Featured artwork preview">
+                <div class="art-card card-main">
+                    <div class="card-heading">
+                        <div class="card-tag">Art process</div>
+                        <button class="tablet-toggle" type="button" data-tablet-toggle aria-expanded="false">Open sketchbook</button>
+                    </div>
+                    <div class="process-slider" data-process-slider>
+                        <figure class="process-slide is-active">
+                            <img src="img/hero/1Sketch.png" alt="Art process, sketch stage" width="900" height="700">
+                            <figcaption><strong>01</strong><span>Sketch</span></figcaption>
+                        </figure>
+                        <figure class="process-slide">
+                            <img src="img/hero/2LineArt.png" alt="Art process, line art stage" width="900" height="700">
+                            <figcaption><strong>02</strong><span>Line art</span></figcaption>
+                        </figure>
+                        <figure class="process-slide">
+                            <img src="img/hero/3Color.png" alt="Art process, color stage" width="900" height="700">
+                            <figcaption><strong>03</strong><span>Color</span></figcaption>
+                        </figure>
+                        <figure class="process-slide">
+                            <img src="img/hero/4Background.png" alt="Art process, background stage" width="900" height="700">
+                            <figcaption><strong>04</strong><span>Background</span></figcaption>
+                        </figure>
+                        <figure class="process-slide">
+                            <img src="img/hero/5Final.png" alt="Art process, final artwork" width="900" height="700">
+                            <figcaption><strong>05</strong><span>Final piece</span></figcaption>
+                        </figure>
+                        <div class="process-controls" aria-label="Art process slides">
+                            <button type="button" class="process-arrow" data-process-prev aria-label="Previous process step">&larr;</button>
+                            <div class="process-dots">
+                                <button type="button" class="process-dot is-active" data-process-slide="0" aria-label="Show sketch stage"></button>
+                                <button type="button" class="process-dot" data-process-slide="1" aria-label="Show line art stage"></button>
+                                <button type="button" class="process-dot" data-process-slide="2" aria-label="Show color stage"></button>
+                                <button type="button" class="process-dot" data-process-slide="3" aria-label="Show background stage"></button>
+                                <button type="button" class="process-dot" data-process-slide="4" aria-label="Show final artwork"></button>
+                            </div>
+                            <button type="button" class="process-arrow" data-process-next aria-label="Next process step">&rarr;</button>
+                        </div>
+                    </div>
+                    <div class="tablet-desk" data-tablet-desk hidden>
+                        <div class="tablet-toolbar">
+                            <div class="tablet-tools" role="group" aria-label="Drawing tools">
+                                <button class="tablet-tool is-active" type="button" data-tablet-tool="brush" aria-pressed="true">Brush</button>
+                                <button class="tablet-tool" type="button" data-tablet-tool="pencil" aria-pressed="false">Pencil</button>
+                            </div>
+                            <div class="tablet-swatches" role="group" aria-label="Drawing colors">
+                                <button class="tablet-swatch is-selected" type="button" data-tablet-color="243, 168, 137" style="--tablet-color: #f3a889" aria-label="Coral" aria-pressed="true"></button>
+                                <button class="tablet-swatch" type="button" data-tablet-color="200, 111, 82" style="--tablet-color: #c86f52" aria-label="Terracotta" aria-pressed="false"></button>
+                                <button class="tablet-swatch" type="button" data-tablet-color="93, 145, 183" style="--tablet-color: #5d91b7" aria-label="Blue" aria-pressed="false"></button>
+                                <button class="tablet-swatch" type="button" data-tablet-color="221, 169, 72" style="--tablet-color: #dda948" aria-label="Golden yellow" aria-pressed="false"></button>
+                                <button class="tablet-swatch" type="button" data-tablet-color="126, 84, 116" style="--tablet-color: #7e5474" aria-label="Plum" aria-pressed="false"></button>
+                            </div>
+                        </div>
+                        <div class="tablet-canvas-wrap">
+                            <canvas class="tablet-canvas" data-tablet-canvas aria-label="Interactive drawing tablet"></canvas>
+                            <span class="tablet-hint">make a mark</span>
+                        </div>
+                        <div class="tablet-actions">
+                            <button type="button" class="tablet-clear" data-tablet-clear>Clear</button>
+                            <button type="button" class="tablet-release" data-tablet-release>Release it &rarr;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="portfolio-strip" aria-label="Portfolio categories">
+            <a class="mini-card" href="illustration.html">
+                <span class="mini-label">Illustration</span>
+                <strong>Story-led visuals</strong>
+            </a>
+            <a class="mini-card" href="portraits.html">
+                <span class="mini-label">Portraits</span>
+                <strong>Character studies</strong>
+            </a>
+            <a class="mini-card" href="graphic-design.html">
+                <span class="mini-label">Shop</span>
+                <strong>Small editions</strong>
+            </a>
+            <a class="mini-card" href="logos.html">
+                <span class="mini-label">Logos</span>
+                <strong>Playful identity</strong>
+            </a>
+        </section>
+
+        <section class="gallery-section reveal" id="gallery">
+            <div class="section-heading">
+                <p class="eyebrow">Home gallery</p>
+                <h2>Recent work with a fresh, expressive point of view.</h2>
+            </div>
+
+            <div class="gallery-grid home-gallery featured-gallery" data-static-gallery="true" data-home-projects aria-label="Projects shown on the homepage">
+                <a class="gallery-card featured-project gallery-card-large reveal" href="illustration.html" data-modal-images="img/illustration/project1/1.jpg|img/illustration/project1/2.jpg|img/illustration/project1/3.jpg|img/illustration/project1/4.jpg">
+                    <img class="featured-image" src="img/illustration/project1/1.jpg" alt="Story panel illustration project">
+                    <div class="tile-overlay"><span>Illustration</span><h3>Story panels</h3><strong>Explore project &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="portraits.html">
+                    <img class="featured-image" src="img/portraits/cute_girl_in_purple_glasses_by_d4dendel_de1hulo-pre.jpg" alt="Portrait artwork with purple glasses">
+                    <div class="tile-overlay"><span>Portraits</span><h3>Purple Glasses</h3><strong>View portraits &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="illustration.html" data-modal-images="img/illustration/project3/author%201.jpg|img/illustration/project3/author%202.jpg|img/illustration/project3/author%203.jpg|img/illustration/project3/author%204.jpg">
+                    <img class="featured-image" src="img/illustration/project3/author%201.jpg" alt="Author portrait illustration series">
+                    <div class="tile-overlay"><span>Illustration</span><h3>Author portraits</h3><strong>Explore series &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="portraits.html">
+                    <img class="featured-image" src="img/portraits/fresh_air_by_d4dendel_de1xc6c-pre.jpg" alt="Fresh Air portrait artwork">
+                    <div class="tile-overlay"><span>Portraits</span><h3>Fresh Air</h3><strong>View portraits &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="illustration.html" data-modal-images="img/illustration/project4/December_KAI-week3-1.jpg|img/illustration/project4/December_KAI-week3-2.jpg|img/illustration/project4/December_KAI-week3-3.jpg">
+                    <img class="featured-image" src="img/illustration/project4/December_KAI-week3-1.jpg" alt="December illustration studies">
+                    <div class="tile-overlay"><span>Illustration</span><h3>December studies</h3><strong>Explore series &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="illustration.html">
+                    <img class="featured-image" src="img/illustration/balaam.jpg" alt="Balaam illustration artwork">
+                    <div class="tile-overlay"><span>Illustration</span><h3>Balaam</h3><strong>Explore illustration &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="portraits.html">
+                    <img class="featured-image" src="img/portraits/chibi_3rd_art_portrait_sancho_boy_cute_by_d4dendel_de1htjg-pre.jpg" alt="Sancho character portrait">
+                    <div class="tile-overlay"><span>Portraits</span><h3>Sancho</h3><strong>View portraits &rarr;</strong></div>
+                </a>
+                <a class="gallery-card featured-project reveal" href="portraits.html">
+                    <img class="featured-image" src="img/portraits/jessa_is_an_angel_by_d4dendel_de1x93k-pre.jpg" alt="Jessa Is an Angel portrait artwork">
+                    <div class="tile-overlay"><span>Portraits</span><h3>Jessa Is an Angel</h3><strong>View portraits &rarr;</strong></div>
+                </a>
+            </div>
+        </section>
+
+        <section class="social-section reveal" aria-labelledby="social-heading">
+            <div class="social-links" aria-label="Social media links">
+                <a href="https://www.instagram.com/d4dyndel" target="_blank" rel="noreferrer" aria-label="Instagram" data-social="instagram">
+                    <img src="img/social/instagram.png" alt="Instagram" width="18" height="18">
+                </a>
+                <a href="https://www.facebook.com/d4dyndel" target="_blank" rel="noreferrer" aria-label="Facebook" data-social="facebook">
+                    <img src="img/social/facebook.png" alt="Facebook" width="18" height="18">
+                </a>
+                <a href="https://twitter.com/d4dyndel" target="_blank" rel="noreferrer" aria-label="Twitter" data-social="twitter">
+                    <img src="img/social/twitter.png" alt="Twitter" width="18" height="18">
+                </a>
+                <a href="https://www.youtube.com/@d4dyndel" target="_blank" rel="noreferrer" aria-label="YouTube" data-social="youtube">
+                    <img src="img/social/youtube.png" alt="YouTube" width="18" height="18">
+                </a>
+            </div>
+        </section>
+
+        <section class="about-contact reveal" id="about">
+            <div class="about-panel">
+                <p class="eyebrow about-heading">About</p>
+                <div class="about-copy">
+                    <p class="about-intro">I am Dyndel Pino,</p>
+                    <p><strong>I'm a multidisciplinary creative who turns ideas into visuals, stories, and digital experiences.</strong></p>
+                    <p>I work across illustration, graphic design, branding, motion, video, and web development. I enjoy experimenting with art and technology to create work that feels playful, expressive, and intentional.</p>
+                    <p><strong>I don't like being limited to one medium. I like figuring out how to bring an idea to life.</strong></p>
+                    <div class="about-tags" aria-label="Creative disciplines">
+                        <span>Illustration</span>
+                        <span>Graphic Design</span>
+                        <span>Web</span>
+                        <span>Comics</span>
+                        <span>Stickers</span>
+                    </div>
+                </div>
+                <div class="about-video" data-about-video>
+                    <iframe
+                        title="Dyndel Pino creative process video"
+                        data-video-src="https://www.youtube.com/embed/f2cCLH0c40s?start=159&autoplay=1&mute=1&playsinline=1&rel=0"
+                        loading="lazy"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        allowfullscreen></iframe>
+                    <a class="about-video-fallback" href="https://youtu.be/f2cCLH0c40s?t=159" target="_blank" rel="noreferrer">
+                        <img src="https://img.youtube.com/vi/f2cCLH0c40s/maxresdefault.jpg" alt="Watch Dyndel Pino's creative process video on YouTube">
+                        <span>Watch video on YouTube &rarr;</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="contact-panel" id="contact">
+                <img class="contact-mascot" src="img/mascot.gif" alt="Dyndel Pino mascot illustration">
+                <p class="eyebrow">Contact</p>
+                <h3>Let’s make something lovely.</h3>
+                <p class="contact-lead">Have a project in mind?</p>
+                <form class="contact-form">
+                    <label>
+                        <span>Name</span>
+                        <input type="text" name="name" placeholder="Your name" required>
+                    </label>
+                    <label>
+                        <span>Email</span>
+                        <input type="email" name="email" placeholder="you@example.com" required>
+                    </label>
+                    <label>
+                        <span>Project type</span>
+                        <select name="projectType" required>
+                            <option value="" selected disabled>Illustration / Branding / Web / Other</option>
+                            <option>Illustration</option>
+                            <option>Graphic design</option>
+                            <option>Branding</option>
+                            <option>Web development</option>
+                            <option>Motion or video</option>
+                            <option>Other</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Message</span>
+                        <textarea name="message" rows="4" placeholder="Tell me about your vision" required></textarea>
+                    </label>
+                    <p class="contact-form-message" data-contact-message role="status"></p>
+                    <button type="submit" class="btn btn-primary contact-cta">Send inquiry</button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>© 2026 Dyndel Pino</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

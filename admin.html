@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin | Dyndel Pino</title>
+    <link rel="icon" type="image/png" href="img/icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="admin">
+    <header class="header">
+        <div class="nav-container">
+            <div class="logo-wrap">
+                <img src="img/icon.png" alt="Dyndel Pino logo">
+                <div class="brand">Dyndel <span>Pino</span></div>
+            </div>
+            <button class="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+            <nav class="nav" aria-label="Main navigation">
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="illustration.html">Illustration</a></li>
+                    <li><a href="portraits.html">Portraits</a></li>
+                    <li><a href="logos.html">Logos</a></li>
+                    <li><a href="graphic-design.html">Shop</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="page-shell admin-page reveal">
+        <section class="admin-header admin-gated-header">
+            <p class="eyebrow">Admin</p>
+            <h1>Manage portfolio content</h1>
+            <p>Secure controls for uploading projects, assigning pages, and choosing homepage visibility.</p>
+        </section>
+
+        <section class="admin-panel admin-login-panel" id="admin-login-panel">
+            <p class="eyebrow">Private area</p>
+            <h2>Sign in to manage content</h2>
+            <form id="admin-login-form" class="admin-form">
+                <label>
+                    <span>Username</span>
+                    <input type="text" name="username" autocomplete="username" required>
+                </label>
+                <label>
+                    <span>Password</span>
+                    <input type="password" name="password" autocomplete="current-password" required>
+                </label>
+                <p class="admin-login-message" id="admin-login-message" role="status"></p>
+                <button type="submit" class="btn btn-primary">Sign in</button>
+            </form>
+            <p class="admin-note">Use the administrator account configured in <code>api/config.php</code>.</p>
+        </section>
+
+        <div class="admin-content" id="admin-content" hidden>
+            <div class="admin-toolbar">
+                <p class="admin-note">Manage portfolio projects and shop products stored in MySQL.</p>
+                <button type="button" class="btn btn-secondary" id="admin-logout">Log out</button>
+            </div>
+
+            <div class="admin-tabs" role="tablist" aria-label="Admin content types">
+                <button class="btn btn-primary admin-tab is-active" type="button" data-admin-tab="projects">Projects</button>
+                <button class="btn btn-secondary admin-tab" type="button" data-admin-tab="products">Shop products</button>
+            </div>
+
+            <div class="admin-grid" data-admin-panel="projects">
+            <section class="admin-panel">
+                <h2 data-project-form-title>Add project</h2>
+                <form id="project-form" class="admin-form">
+                    <input type="hidden" name="id">
+                    <label>
+                        <span>Project title</span>
+                        <input type="text" name="title" placeholder="e.g. Blue Hour Studio" required>
+                    </label>
+                    <label>
+                        <span>Category</span>
+                        <select name="category" required>
+                            <option value="Illustration">Illustration</option>
+                            <option value="Graphic Design">Graphic Design</option>
+                            <option value="Portraits">Portraits</option>
+                            <option value="Logos">Logos</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Project images (up to 12 panels)</span>
+                        <input type="file" name="imageFiles[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple>
+                    </label>
+                    <label>
+                        <span>Image URL (local fallback)</span>
+                        <input type="url" name="image" placeholder="https://example.com/image.jpg">
+                    </label>
+                    <label>
+                        <span>Short description</span>
+                        <textarea name="description" rows="4" placeholder="Enter project details" required></textarea>
+                    </label>
+                    <label class="admin-checkbox">
+                        <input type="checkbox" name="showHome" checked>
+                        <span>Show this project on the home gallery</span>
+                    </label>
+                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save project</button><button type="button" class="btn btn-secondary" data-cancel-project hidden>Cancel edit</button></div>
+                </form>
+            </section>
+
+            <section class="admin-panel">
+                <h2>Social links</h2>
+                <form id="social-form" class="admin-form">
+                    <label>
+                        <span>Instagram</span>
+                        <input type="url" name="instagram" placeholder="https://instagram.com/yourhandle">
+                    </label>
+                    <label>
+                        <span>Facebook</span>
+                        <input type="url" name="facebook" placeholder="https://facebook.com/yourpage">
+                    </label>
+                    <label>
+                        <span>Twitter</span>
+                        <input type="url" name="twitter" placeholder="https://twitter.com/yourhandle">
+                    </label>
+                    <label>
+                        <span>YouTube</span>
+                        <input type="url" name="youtube" placeholder="https://youtube.com/@yourchannel">
+                    </label>
+                    <button type="submit" class="btn btn-primary">Save links</button>
+                </form>
+            </section>
+        </div>
+
+        <div class="admin-shop-panel" data-admin-panel="products" hidden>
+            <section class="admin-panel">
+                <h2 data-product-form-title>Add shop product</h2>
+                <form id="product-form" class="admin-form">
+                    <input type="hidden" name="id">
+                    <label><span>SKU</span><input name="sku" required placeholder="PRINT-001"></label>
+                    <label><span>Product title</span><input name="title" required></label>
+                    <label><span>Product image</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+                    <label><span>Image URL</span><input type="url" name="image" placeholder="https://example.com/product.jpg"></label>
+                    <label><span>Description</span><textarea name="description" rows="3" required></textarea></label>
+                    <label><span>Price</span><input type="number" name="price" min="0" step="0.01" required></label>
+                    <label><span>Stock</span><input type="number" name="stock" min="0" step="1" required></label>
+                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save product</button><button type="button" class="btn btn-secondary" data-cancel-product hidden>Cancel edit</button></div>
+                </form>
+            </section>
+            <section class="admin-panel admin-list-panel">
+                <h2>Shop inventory</h2>
+                <div id="product-list" class="project-list"></div>
+            </section>
+        </div>
+
+        <section class="admin-panel admin-list-panel">
+            <h2>Saved projects</h2>
+            <div id="project-list" class="project-list"></div>
+        </section>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>© 2026 Dyndel Pino</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
