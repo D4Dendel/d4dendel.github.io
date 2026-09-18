@@ -64,49 +64,54 @@
             </div>
 
             <div class="admin-tabs" role="tablist" aria-label="Admin content types">
-                <button class="btn btn-primary admin-tab is-active" type="button" data-admin-tab="projects">Projects</button>
-                <button class="btn btn-secondary admin-tab" type="button" data-admin-tab="products">Shop products</button>
+                <button class="btn btn-primary admin-tab is-active" type="button" data-admin-tab="projects">Portfolio Content</button>
+                <button class="btn btn-secondary admin-tab" type="button" data-admin-tab="products">Shop</button>
             </div>
 
-            <div class="admin-grid" data-admin-panel="projects">
-            <section class="admin-panel">
-                <h2 data-project-form-title>Add project</h2>
+            <div class="admin-portfolio-panel" data-admin-panel="projects">
+            <div class="admin-section-toolbar">
+                <div>
+                    <h2>Portfolio projects</h2>
+                    <p class="admin-note">Arrange, edit, and publish your project gallery.</p>
+                </div>
+                <div class="admin-view-controls" role="group" aria-label="Portfolio view">
+                    <button class="btn btn-primary is-active" type="button" data-project-view="grid">Grid</button>
+                    <button class="btn btn-secondary" type="button" data-project-view="list">List</button>
+                    <button class="btn btn-primary" type="button" data-open-project-modal>Add project</button>
+                </div>
+            </div>
+
+            <section class="admin-panel project-editor-modal" data-project-modal hidden>
+                <div class="project-modal-header">
+                    <div>
+                        <p class="eyebrow">Portfolio project</p>
+                        <h2 data-project-form-title>Add project</h2>
+                    </div>
+                    <button type="button" class="icon-button" data-close-project-modal aria-label="Close project editor">&times;</button>
+                </div>
                 <form id="project-form" class="admin-form">
-                    <input type="hidden" name="id">
-                    <label>
-                        <span>Project title</span>
-                        <input type="text" name="title" placeholder="e.g. Blue Hour Studio" required>
-                    </label>
-                    <label>
-                        <span>Category</span>
-                        <select name="category" required>
-                            <option value="Illustration">Illustration</option>
-                            <option value="Graphic Design">Graphic Design</option>
-                            <option value="Portraits">Portraits</option>
-                            <option value="Logos">Logos</option>
-                        </select>
-                    </label>
-                    <label>
-                        <span>Project images (up to 12 panels)</span>
-                        <input type="file" name="imageFiles[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple>
-                    </label>
-                    <label>
-                        <span>Image URL (local fallback)</span>
-                        <input type="url" name="image" placeholder="https://example.com/image.jpg">
-                    </label>
-                    <label>
-                        <span>Short description</span>
-                        <textarea name="description" rows="4" placeholder="Enter project details" required></textarea>
-                    </label>
-                    <label class="admin-checkbox">
-                        <input type="checkbox" name="showHome" checked>
-                        <span>Show this project on the home gallery</span>
-                    </label>
-                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save project</button><button type="button" class="btn btn-secondary" data-cancel-project hidden>Cancel edit</button></div>
+                    <div class="project-editor-layout">
+                        <div class="project-media-fields">
+                            <div class="project-media-preview" data-project-preview><span>Project image preview</span></div>
+                            <label><span>Project images (up to 12 panels)</span><input type="file" name="imageFiles[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple></label>
+                            <label><span>Image URL (local fallback)</span><input type="url" name="image" placeholder="https://example.com/image.jpg"></label>
+                        </div>
+                        <div class="project-info-fields">
+                            <input type="hidden" name="id">
+                            <label><span>Project title</span><input type="text" name="title" placeholder="e.g. Blue Hour Studio" required></label>
+                            <label><span>Category</span><select name="category" required><option value="Illustration">Illustration</option><option value="Graphic Design">Graphic Design</option><option value="Portraits">Portraits</option><option value="Logos">Logos</option></select></label>
+                            <label><span>Sort order</span><input type="number" name="sortOrder" min="0" step="1" value="0" required></label>
+                            <label><span>Slug</span><input type="text" name="slug" placeholder="blue-hour-studio" pattern="[A-Za-z0-9-]+"></label>
+                            <label><span>Alt text</span><input type="text" name="altText" maxlength="255" placeholder="Describe the project artwork"></label>
+                            <label><span>Description</span><textarea name="description" rows="4" placeholder="Enter project details" required></textarea></label>
+                            <label class="admin-checkbox"><input type="checkbox" name="showHome" checked><span>Show this project on the home gallery</span></label>
+                        </div>
+                    </div>
+                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save project</button><button type="button" class="btn btn-secondary" data-cancel-project>Cancel</button></div>
                 </form>
             </section>
 
-            <section class="admin-panel">
+            <section class="admin-panel admin-social-panel">
                 <h2>Social links</h2>
                 <form id="social-form" class="admin-form">
                     <label>
@@ -127,6 +132,11 @@
                     </label>
                     <button type="submit" class="btn btn-primary">Save links</button>
                 </form>
+            </section>
+
+            <section class="admin-panel admin-list-panel portfolio-projects-list">
+                <h2>Saved projects</h2>
+                <div id="project-list" class="project-list"></div>
             </section>
         </div>
 
@@ -151,10 +161,6 @@
             </section>
         </div>
 
-        <section class="admin-panel admin-list-panel">
-            <h2>Saved projects</h2>
-            <div id="project-list" class="project-list"></div>
-        </section>
         </div>
     </main>
 

@@ -78,9 +78,9 @@ if ($action === 'session' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
 if ($action === 'projects' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $showHomeOnly = ($_GET['home'] ?? '') === '1';
-    $sql = 'SELECT id, title, category, image_url AS image, image_urls, description, show_home AS showHome FROM projects';
+    $sql = 'SELECT id, title, slug, category, image_url AS image, image_urls, alt_text AS altText, description, show_home AS showHome, sort_order AS sortOrder FROM projects';
     if ($showHomeOnly) $sql .= ' WHERE show_home = 1';
-    $sql .= ' ORDER BY created_at DESC';
+    $sql .= ' ORDER BY sort_order ASC, created_at DESC, id DESC';
     $projects = db()->query($sql)->fetchAll();
     foreach ($projects as &$project) {
         $project['images'] = json_decode($project['image_urls'] ?? '', true) ?: [$project['image']];
@@ -112,10 +112,26 @@ if ($action === 'project') {
     require_post();
     require_auth();
     $title = request_string('title', 160);
+    $slug = trim((string)($_POST['slug'] ?? ''));
+    $slug = strtolower((string)preg_replace('/[^a-z0-9]+/i', '-', $slug ?: $title));
+    $slug = trim($slug, '-');
+    if ($slug === '') json_response(['error' => 'Enter a valid project slug.'], 422);
+    $altText = trim((string)($_POST['altText'] ?? '')) ?: $title;
+    if (strlen($altText) > 255) json_response(['error' => 'Alt text is too long.'], 422);
+    $sortOrder = filter_var($_POST['sortOrder'] ?? null, FILTER_VALIDATE_INT);
+    $projectId = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
+    if (($sortOrder === false || $sortOrder === null || $sortOrder < 0) && $projectId) {
+        $existingOrder = db()->prepare('SELECT sort_order FROM projects WHERE id = ?');
+        $existingOrder->execute([$projectId]);
+        $sortOrder = $existingOrder->fetchColumn();
+        if ($sortOrder === false) json_response(['error' => 'Project not found.'], 404);
+    }
+    if ($sortOrder === false || $sortOrder === null || $sortOrder < 0) {
+        $sortOrder = (int)db()->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM projects')->fetchColumn();
+    }
     $category = request_string('category', 80);
     $description = request_string('description', 2000);
     $showHome = ($_POST['showHome'] ?? '') === '1' ? 1 : 0;
-    $projectId = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
 
     $folders = [
         'Illustration' => 'illustration',
@@ -153,6 +169,9 @@ if ($action === 'project') {
         $imageUrls[] = PROJECT_UPLOAD_URL . $folders[$category] . '/' . $filename;
     }
     if ($projectId) {
+        $slugCheck = db()->prepare('SELECT id FROM projects WHERE slug = ? AND id <> ? LIMIT 1');
+        $slugCheck->execute([$slug, $projectId]);
+        if ($slugCheck->fetch()) json_response(['error' => 'That project slug is already in use.'], 422);
         if (!$imageUrls) {
             $existing = db()->prepare('SELECT image_url, image_urls FROM projects WHERE id = ?');
             $existing->execute([$projectId]);
@@ -160,13 +179,16 @@ if ($action === 'project') {
             if (!$current) json_response(['error' => 'Project not found.'], 404);
             $imageUrls = json_decode($current['image_urls'] ?? '', true) ?: [$current['image_url']];
         }
-        $stmt = db()->prepare('UPDATE projects SET title = ?, category = ?, image_url = ?, image_urls = ?, description = ?, show_home = ? WHERE id = ?');
-        $stmt->execute([$title, $category, $imageUrls[0], json_encode($imageUrls), $description, $showHome, $projectId]);
+        $stmt = db()->prepare('UPDATE projects SET title = ?, slug = ?, category = ?, image_url = ?, image_urls = ?, alt_text = ?, description = ?, show_home = ?, sort_order = ? WHERE id = ?');
+        $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder, $projectId]);
         json_response(['updated' => true]);
     }
-    $stmt = db()->prepare('INSERT INTO projects (title, category, image_url, image_urls, description, show_home) VALUES (?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$title, $category, $imageUrls[0], json_encode($imageUrls), $description, $showHome]);
-    json_response(['project' => ['id' => db()->lastInsertId(), 'title' => $title, 'category' => $category, 'image' => $imageUrls[0], 'images' => $imageUrls, 'description' => $description, 'showHome' => (bool)$showHome]], 201);
+    $slugCheck = db()->prepare('SELECT id FROM projects WHERE slug = ? LIMIT 1');
+    $slugCheck->execute([$slug]);
+    if ($slugCheck->fetch()) json_response(['error' => 'That project slug is already in use.'], 422);
+    $stmt = db()->prepare('INSERT INTO projects (title, slug, category, image_url, image_urls, alt_text, description, show_home, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder]);
+    json_response(['project' => ['id' => db()->lastInsertId(), 'title' => $title, 'slug' => $slug, 'category' => $category, 'image' => $imageUrls[0], 'images' => $imageUrls, 'altText' => $altText, 'description' => $description, 'showHome' => (bool)$showHome, 'sortOrder' => $sortOrder]], 201);
 }
 
 if ($action === 'delete-project') {

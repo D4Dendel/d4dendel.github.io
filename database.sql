@@ -4,13 +4,20 @@ USE dyndel_portfolio;
 CREATE TABLE IF NOT EXISTS projects (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(160) NOT NULL,
+    slug VARCHAR(180) NULL,
     category VARCHAR(80) NOT NULL,
     image_url VARCHAR(255) NOT NULL,
     image_urls TEXT NULL,
+    alt_text VARCHAR(255) NULL,
     description TEXT NOT NULL,
     show_home TINYINT(1) NOT NULL DEFAULT 1,
+    sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS slug VARCHAR(180) NULL AFTER title;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS alt_text VARCHAR(255) NULL AFTER image_urls;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0 AFTER show_home;
 
 CREATE TABLE IF NOT EXISTS shop_products (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -75,6 +82,10 @@ INSERT INTO projects (title, category, image_url, image_urls, description, show_
 ('Arise', 'Graphic Design', 'img/graphic_design/arise/Event%20Main.jpg', '["img/graphic_design/arise/Event%20Main.jpg"]', 'An event campaign identity.', 1),
 ('Invitation', 'Graphic Design', 'img/graphic_design/Invitation/Invitation.jpg', '["img/graphic_design/Invitation/Invitation.jpg","img/graphic_design/Invitation/Invitation2.jpg"]', 'A print and event stationery system.', 1),
 ('Moon Silhouette', 'Graphic Design', 'img/graphic_design/Moon%20Silhoutte.jpg', '["img/graphic_design/Moon%20Silhoutte.jpg"]', 'An individual graphic design piece.', 0);
+
+UPDATE projects SET slug = CONCAT('project-', id) WHERE slug IS NULL OR slug = '';
+UPDATE projects SET alt_text = title WHERE alt_text IS NULL OR alt_text = '';
+UPDATE projects SET sort_order = id WHERE sort_order = 0;
 
 -- The admin account is configured in api/config.php with a password hash.
 -- Do not store plaintext passwords in this database.

@@ -2394,6 +2394,11 @@ body.modal-is-open {
         padding: 16px 20px;
     }
 
+    body > *:not(.pointer-canvas):not(.brush-palette):not(.released-sketch):not(.art-modal).header {
+        isolation: isolate;
+        z-index: 100;
+    }
+
     .logo-wrap {
         min-width: 0;
     }
@@ -2401,6 +2406,8 @@ body.modal-is-open {
     .menu-toggle {
         display: flex;
         margin-left: auto;
+        position: relative;
+        z-index: 121;
     }
 
     .nav {
@@ -2416,7 +2423,8 @@ body.modal-is-open {
         visibility: hidden;
         transform: translateY(-8px);
         transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
-        z-index: 110;
+        z-index: 120;
+        isolation: isolate;
     }
 
     .nav.open {
@@ -2485,6 +2493,7 @@ body.modal-is-open {
     .card-main {
         width: min(100%, 590px);
         transform: rotate(-2deg);
+        cursor: pointer;
     }
 
     .card-main:hover {
@@ -2748,4 +2757,168 @@ body.modal-is-open {
     border: 1px solid #b5544f;
     background: transparent;
     color: #9b3733;
+}
+
+.admin-section-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin: 24px 0;
+}
+
+.admin-section-toolbar h2 {
+    margin-bottom: 4px;
+    font-family: "Patrick Hand", cursive;
+    font-size: 2.2rem;
+    font-weight: 400;
+}
+
+.admin-view-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.admin-view-controls .is-active {
+    box-shadow: 0 0 0 2px var(--text) inset;
+}
+
+.project-editor-modal {
+    position: fixed;
+    inset: 7vh 6vw auto;
+    z-index: 210;
+    max-height: 86vh;
+    overflow-y: auto;
+    background: rgba(255, 248, 243, 0.98);
+    box-shadow: 0 28px 80px rgba(61, 41, 37, 0.24);
+}
+
+.project-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.project-modal-header h2 {
+    margin-bottom: 0;
+}
+
+.project-editor-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.15fr);
+    gap: 28px;
+}
+
+.project-media-fields,
+.project-info-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.project-media-preview {
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    overflow: hidden;
+    border: 1px dashed var(--line);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--muted);
+    text-align: center;
+}
+
+.project-media-preview img {
+    width: 100%;
+    height: 240px;
+    object-fit: cover;
+}
+
+.project-media-preview span {
+    padding: 0 14px;
+    font-size: 0.78rem;
+}
+
+.project-list.is-list-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.project-list.is-list-view .project-item {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+}
+
+.project-list.is-list-view .project-item img {
+    width: 84px;
+    height: 84px;
+}
+
+.project-list.is-list-view .project-item .project-copy {
+    display: grid;
+    grid-template-columns: minmax(100px, 1fr) minmax(120px, 1fr) auto;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 12px 16px;
+}
+
+.project-list.is-list-view .project-item h3,
+.project-list.is-list-view .project-item p {
+    margin: 0;
+}
+
+.project-list.is-list-view .project-toggle {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+    .admin-section-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-view-controls > * {
+        flex: 1 1 auto;
+    }
+
+    .project-editor-modal {
+        inset: 12px;
+        max-height: calc(100vh - 24px);
+        padding: 20px;
+    }
+
+    .project-editor-layout {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .project-media-preview {
+        min-height: 190px;
+    }
+
+    .project-list.is-list-view .project-item {
+        grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .project-list.is-list-view .project-item img {
+        width: 64px;
+        height: 64px;
+    }
+
+    .project-list.is-list-view .project-item .project-copy {
+        display: block;
+        padding: 10px 12px;
+    }
+
+    .project-list.is-list-view .project-item .project-copy > * {
+        margin-bottom: 8px;
+    }
 }

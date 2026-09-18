@@ -338,6 +338,7 @@ const cmsRequest = async (action, options = {}) => {
 };
 
 const projectList = document.getElementById('project-list');
+const projectModal = document.querySelector('[data-project-modal]');
 
 const adminLoginForm = document.getElementById('admin-login-form');
 const adminLoginPanel = document.getElementById('admin-login-panel');
@@ -421,10 +422,10 @@ const renderProjectList = async () => {
   if (!projectList) return;
 
   projectList.innerHTML = projects.map((project) => `
-    <article class="project-item">
-      <img src="${project.image}" alt="${project.title}">
+    <article class="project-item" data-project-item>
+      <img src="${project.image}" alt="${project.altText || project.title}">
       <div class="project-copy">
-        <span class="project-badge">${project.category}</span>
+        <span class="project-badge">#${Number(project.sortOrder ?? project.sort_order ?? 0)} &middot; ${project.category}</span>
         <h3>${project.title}</h3>
         <p>${project.description}</p>
         <div class="admin-item-actions"><button class="btn btn-secondary" type="button" data-edit-project="${project.id}">Edit</button><button class="btn btn-danger" type="button" data-delete-project="${project.id}">Delete</button></div>
@@ -455,13 +456,7 @@ const renderProjectList = async () => {
     button.addEventListener('click', () => {
       const project = projects.find((item) => Number(item.id) === Number(button.dataset.editProject));
       if (!project || !projectForm) return;
-      projectForm.elements.id.value = project.id;
-      projectForm.elements.title.value = project.title;
-      projectForm.elements.category.value = project.category;
-      projectForm.elements.description.value = project.description;
-      projectForm.elements.showHome.checked = project.showHome !== false && project.showHome !== 0 && project.showHome !== '0';
-      document.querySelector('[data-project-form-title]').textContent = 'Edit project';
-      document.querySelector('[data-cancel-project]').hidden = false;
+      openProjectModal(project);
       document.querySelector('[data-admin-tab="projects"]')?.click();
       projectForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -478,12 +473,48 @@ const renderProjectList = async () => {
   });
 };
 
+const projectForm = document.getElementById('project-form');
+
+const resetProjectForm = () => {
+  projectForm?.reset();
+  if (projectForm) projectForm.elements.id.value = '';
+  if (projectForm) projectForm.elements.sortOrder.value = '0';
+  document.querySelector('[data-project-form-title]')?.replaceChildren(document.createTextNode('Add project'));
+  const preview = document.querySelector('[data-project-preview]');
+  if (preview) preview.innerHTML = '<span>Project image preview</span>';
+};
+
+const closeProjectModal = () => {
+  if (projectModal) projectModal.hidden = true;
+  resetProjectForm();
+};
+
+const openProjectModal = (project = null) => {
+  if (!projectForm || !projectModal) return;
+  resetProjectForm();
+  if (project) {
+      projectForm.elements.id.value = project.id;
+      projectForm.elements.title.value = project.title;
+      projectForm.elements.slug.value = project.slug || '';
+      projectForm.elements.category.value = project.category;
+      projectForm.elements.description.value = project.description;
+      projectForm.elements.altText.value = project.altText || '';
+      const storedSortOrder = project.sortOrder ?? project.sort_order;
+      projectForm.elements.sortOrder.value = storedSortOrder === undefined || storedSortOrder === null ? '' : String(storedSortOrder);
+      projectForm.elements.showHome.checked = project.showHome !== false && project.showHome !== 0 && project.showHome !== '0';
+      document.querySelector('[data-project-form-title]').textContent = 'Edit project';
+      const preview = document.querySelector('[data-project-preview]');
+      if (preview) preview.innerHTML = `<img src="${project.image}" alt="${project.altText || project.title}"><span>${project.images?.length || 1} image${(project.images?.length || 1) === 1 ? '' : 's'} stored</span>`;
+  }
+  projectModal.hidden = false;
+};
+
 const projectCardMarkup = (project) => {
   const images = project.images || [project.image];
   const controls = images.length > 1 ? `<div class="project-card-controls"><button type="button" data-card-prev aria-label="Previous panel">&larr;</button><span data-card-index>1 / ${images.length}</span><button type="button" data-card-next aria-label="Next panel">&rarr;</button></div>` : '';
   return `
     <article class="gallery-card admin-project-card reveal visible" data-modal-images="${images.join('|')}" data-card-images="${images.join('|')}" data-card-position="0">
-      <img class="featured-image" src="${images[0]}" alt="${project.title}" loading="lazy">
+      <img class="featured-image" src="${images[0]}" alt="${project.altText || project.title}" loading="lazy">
       ${controls}
       <div class="tile-overlay"><span>${project.category}</span><h3>${project.title}</h3><p>${project.description}</p></div>
     </article>
@@ -893,6 +924,15 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
     setTabletMode(tabletDesk.hidden);
   });
 
+  if (isMobileViewport) {
+    tabletCard?.addEventListener('click', (event) => {
+      if (!tabletDesk.hidden || event.target.closest('button, a, input, textarea, select, .tablet-desk')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setTabletMode(true);
+    });
+  }
+
   tabletCard?.addEventListener('pointerenter', () => setTabletMode(true));
   tabletCard?.addEventListener('pointerleave', () => setTabletMode(false));
 
@@ -980,7 +1020,6 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
   });
 }
 
-const projectForm = document.getElementById('project-form');
 if (projectForm) {
   projectForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -997,6 +1036,7 @@ if (projectForm) {
         document.querySelector('[data-project-form-title]')?.replaceChildren(document.createTextNode('Add project'));
         const cancelProject = document.querySelector('[data-cancel-project]');
         if (cancelProject) cancelProject.hidden = true;
+        closeProjectModal();
         await renderProjectList();
         await renderManagedProjectViews();
       } catch (error) {
@@ -1031,9 +1071,19 @@ if (projectForm) {
     renderProjectList();
     renderHomepageGallery();
     renderManagedProjectViews();
-    projectForm.reset();
+      projectForm.reset();
+      resetProjectForm();
   });
 }
+
+document.querySelector('[data-open-project-modal]')?.addEventListener('click', () => openProjectModal());
+document.querySelector('[data-close-project-modal]')?.addEventListener('click', closeProjectModal);
+document.querySelector('[data-cancel-project]')?.addEventListener('click', closeProjectModal);
+
+document.querySelectorAll('[data-project-view]').forEach((control) => control.addEventListener('click', () => {
+  document.querySelectorAll('[data-project-view]').forEach((item) => item.classList.toggle('is-active', item === control));
+  projectList?.classList.toggle('is-list-view', control.dataset.projectView === 'list');
+}));
 
 const socialForm = document.getElementById('social-form');
 if (socialForm) {
