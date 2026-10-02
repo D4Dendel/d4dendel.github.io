@@ -9,164 +9,146 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/admin.css">
 </head>
-<body data-page="admin">
-    <header class="header">
+<body data-page="admin" class="cms-app">
+    <header class="header cms-topbar">
         <div class="nav-container">
             <div class="logo-wrap">
                 <img src="img/icon.png" alt="Dyndel Pino logo">
-                <div class="brand">Dyndel <span>Pino</span></div>
+                <div class="brand">Dyndel <span>CMS</span></div>
             </div>
-            <button class="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
-                <span></span><span></span><span></span>
-            </button>
-            <nav class="nav" aria-label="Main navigation">
-                <ul>
-                    <li><a href="index.html">Home</a></li>
-                    <li><a href="illustration.html">Illustration</a></li>
-                    <li><a href="portraits.html">Portraits</a></li>
-                    <li><a href="logos.html">Logos</a></li>
-                    <li><a href="graphic-design.html">Shop</a></li>
-                </ul>
-            </nav>
+            <a class="cms-public-link" href="index.html">View public site</a>
         </div>
     </header>
 
-    <main class="page-shell admin-page reveal">
-        <section class="admin-header admin-gated-header">
-            <p class="eyebrow">Admin</p>
-            <h1>Manage portfolio content</h1>
-            <p>Secure controls for uploading projects, assigning pages, and choosing homepage visibility.</p>
-        </section>
-
-        <section class="admin-panel admin-login-panel" id="admin-login-panel">
-            <p class="eyebrow">Private area</p>
-            <h2>Sign in to manage content</h2>
-            <form id="admin-login-form" class="admin-form">
-                <label>
-                    <span>Username</span>
-                    <input type="text" name="username" autocomplete="username" required>
-                </label>
-                <label>
-                    <span>Password</span>
-                    <input type="password" name="password" autocomplete="current-password" required>
-                </label>
+    <main class="cms-main">
+        <section class="cms-login" id="admin-login-panel">
+            <div class="cms-login-heading"><span class="cms-kicker">Private workspace</span><h1>Sign in</h1><p>Access portfolio and shop management.</p></div>
+            <form id="admin-login-form" class="cms-form">
+                <label><span>Username</span><input type="text" name="username" autocomplete="username" required></label>
+                <label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
                 <p class="admin-login-message" id="admin-login-message" role="status"></p>
-                <button type="submit" class="btn btn-primary">Sign in</button>
+                <button type="submit" class="cms-button cms-button-primary">Sign in</button>
             </form>
-            <p class="admin-note">Use the administrator account configured in <code>api/config.php</code>.</p>
         </section>
 
-        <div class="admin-content" id="admin-content" hidden>
-            <div class="admin-toolbar">
-                <p class="admin-note">Manage portfolio projects and shop products stored in MySQL.</p>
-                <button type="button" class="btn btn-secondary" id="admin-logout">Log out</button>
-            </div>
+        <div class="cms-shell admin-content" id="admin-content" hidden>
+            <aside class="cms-sidebar" aria-label="CMS modules">
+                <div class="cms-sidebar-label">Workspace</div>
+                <nav class="cms-module-nav">
+                    <button type="button" class="is-active" data-admin-module="dashboard">Dashboard</button>
+                    <button type="button" data-admin-module="projects">Projects</button>
+                    <button type="button" data-admin-module="content">Content</button>
+                    <button type="button" data-admin-module="shop">Shop</button>
+                    <button type="button" data-admin-module="theme">Theme</button>
+                    <button type="button" data-admin-module="settings">Settings</button>
+                </nav>
+                <button type="button" class="cms-logout" id="admin-logout">Log out</button>
+            </aside>
 
-            <div class="admin-tabs" role="tablist" aria-label="Admin content types">
-                <button class="btn btn-primary admin-tab is-active" type="button" data-admin-tab="projects">Portfolio Content</button>
-                <button class="btn btn-secondary admin-tab" type="button" data-admin-tab="products">Shop</button>
-            </div>
-
-            <div class="admin-portfolio-panel" data-admin-panel="projects">
-            <div class="admin-section-toolbar">
-                <div>
-                    <h2>Portfolio projects</h2>
-                    <p class="admin-note">Arrange, edit, and publish your project gallery.</p>
-                </div>
-                <div class="admin-view-controls" role="group" aria-label="Portfolio view">
-                    <button class="btn btn-primary is-active" type="button" data-project-view="grid">Grid</button>
-                    <button class="btn btn-secondary" type="button" data-project-view="list">List</button>
-                    <button class="btn btn-primary" type="button" data-open-project-modal>Add project</button>
-                </div>
-            </div>
-
-            <section class="admin-panel project-editor-modal" data-project-modal hidden>
-                <div class="project-modal-header">
-                    <div>
-                        <p class="eyebrow">Portfolio project</p>
-                        <h2 data-project-form-title>Add project</h2>
+            <div class="cms-workspace">
+                <section class="cms-module" data-admin-module-panel="dashboard">
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Overview</span><h1>Dashboard</h1></div></div>
+                    <div class="cms-stat-grid">
+                        <article class="cms-stat"><span>Projects</span><strong data-dashboard-project-count>--</strong></article>
+                        <article class="cms-stat"><span>On homepage</span><strong data-dashboard-home-count>--</strong></article>
+                        <article class="cms-stat"><span>Shop products</span><strong data-dashboard-product-count>--</strong></article>
                     </div>
-                    <button type="button" class="icon-button" data-close-project-modal aria-label="Close project editor">&times;</button>
-                </div>
-                <form id="project-form" class="admin-form">
-                    <div class="project-editor-layout">
-                        <div class="project-media-fields">
-                            <div class="project-media-preview" data-project-preview><span>Project image preview</span></div>
-                            <label><span>Project images (up to 12 panels)</span><input type="file" name="imageFiles[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple></label>
-                            <label><span>Image URL (local fallback)</span><input type="url" name="image" placeholder="https://example.com/image.jpg"></label>
-                        </div>
-                        <div class="project-info-fields">
+                    <div class="cms-section-heading"><h2>Workspace modules</h2><p>Manage portfolio projects, content, and shop inventory.</p></div>
+                </section>
+
+                <section class="cms-module" data-admin-module-panel="projects" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Portfolio</span><h1>Projects</h1></div><button type="button" class="cms-button cms-button-primary" data-open-project-modal>Add project</button></div>
+                    <div class="cms-toolbar">
+                        <label class="cms-search"><span>Search projects</span><input id="project-search" type="search" placeholder="Title or description"></label>
+                        <label><span>Category</span><select id="project-category-filter"><option value="">All categories</option><option>Illustration</option><option>Graphic Design</option><option>Portraits</option><option>Logos</option></select></label>
+                        <label><span>Homepage</span><select id="project-home-filter"><option value="">All visibility</option><option value="1">Shown on home</option><option value="0">Hidden from home</option></select></label>
+                        <label><span>Sort by</span><select id="project-sort"><option value="order-asc">Order, low to high</option><option value="order-desc">Order, high to low</option><option value="title-asc">Title, A to Z</option><option value="title-desc">Title, Z to A</option></select></label>
+                        <div class="cms-view-switch" role="group" aria-label="Project layout"><button type="button" class="is-active" data-project-view="grid" aria-label="Grid view" title="Grid view">Grid</button><button type="button" data-project-view="list" aria-label="List view" title="List view">List</button></div>
+                    </div>
+                    <section class="cms-editor" data-project-modal hidden>
+                        <div class="cms-section-heading"><div><span class="cms-kicker">Project details</span><h2 data-project-form-title>Add project</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-project-modal aria-label="Close project editor">Close</button></div>
+                        <form id="project-form" class="cms-form">
+                            <div class="project-editor-layout">
+                                <div class="project-media-fields">
+                                    <div class="project-media-preview" data-project-preview><span>Project image preview</span></div>
+                                    <label><span>Project images (up to 12 panels)</span><input type="file" name="imageFiles[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple></label>
+                                    <label><span>Image URL (local fallback)</span><input type="url" name="image" placeholder="https://example.com/image.jpg"></label>
+                                </div>
+                                <div class="project-info-fields">
+                                    <input type="hidden" name="id">
+                                    <label><span>Project title</span><input type="text" name="title" placeholder="e.g. Blue Hour Studio" required></label>
+                                    <label><span>Category</span><select name="category" required><option value="Illustration">Illustration</option><option value="Graphic Design">Graphic Design</option><option value="Portraits">Portraits</option><option value="Logos">Logos</option></select></label>
+                                    <label><span>Sort order</span><input type="number" name="sortOrder" min="0" step="1" value="0" required></label>
+                                    <label><span>Slug</span><input type="text" name="slug" placeholder="blue-hour-studio" pattern="[A-Za-z0-9-]+"></label>
+                                    <label><span>Alt text</span><input type="text" name="altText" maxlength="255" placeholder="Describe the project artwork"></label>
+                                    <label><span>Description</span><textarea name="description" rows="4" placeholder="Enter project details" required></textarea></label>
+                                    <label class="admin-checkbox"><input type="checkbox" name="showHome" checked><span>Show this project on the home gallery</span></label>
+                                </div>
+                            </div>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Save project</button><button type="button" class="cms-button cms-button-subtle" data-cancel-project>Cancel</button></div>
+                        </form>
+                    </section>
+                    <div id="project-list" class="project-list cms-project-list"></div>
+                </section>
+
+                <section class="cms-module" data-admin-module-panel="content" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div></div>
+                    <div class="cms-empty-state"><h2>Content management</h2><p>This module is reserved for future blog, card, and editorial content management.</p></div>
+                </section>
+
+                <section class="cms-module" data-admin-module-panel="shop" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Commerce</span><h1>Shop</h1></div></div>
+                    <section class="cms-editor cms-shop-editor">
+                        <div class="cms-section-heading"><h2 data-product-form-title>Add shop product</h2></div>
+                        <form id="product-form" class="cms-form cms-shop-form">
                             <input type="hidden" name="id">
-                            <label><span>Project title</span><input type="text" name="title" placeholder="e.g. Blue Hour Studio" required></label>
-                            <label><span>Category</span><select name="category" required><option value="Illustration">Illustration</option><option value="Graphic Design">Graphic Design</option><option value="Portraits">Portraits</option><option value="Logos">Logos</option></select></label>
-                            <label><span>Sort order</span><input type="number" name="sortOrder" min="0" step="1" value="0" required></label>
-                            <label><span>Slug</span><input type="text" name="slug" placeholder="blue-hour-studio" pattern="[A-Za-z0-9-]+"></label>
-                            <label><span>Alt text</span><input type="text" name="altText" maxlength="255" placeholder="Describe the project artwork"></label>
-                            <label><span>Description</span><textarea name="description" rows="4" placeholder="Enter project details" required></textarea></label>
-                            <label class="admin-checkbox"><input type="checkbox" name="showHome" checked><span>Show this project on the home gallery</span></label>
-                        </div>
+                            <label><span>SKU</span><input name="sku" required placeholder="PRINT-001"></label>
+                            <label><span>Product title</span><input name="title" required></label>
+                            <label><span>Product image</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+                            <label><span>Image URL</span><input type="url" name="image" placeholder="https://example.com/product.jpg"></label>
+                            <label><span>Description</span><textarea name="description" rows="3" required></textarea></label>
+                            <label><span>Price</span><input type="number" name="price" min="0" step="0.01" required></label>
+                            <label><span>Stock</span><input type="number" name="stock" min="0" step="1" required></label>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Save product</button><button type="button" class="cms-button cms-button-subtle" data-cancel-product hidden>Cancel edit</button></div>
+                        </form>
+                    </section>
+                    <div class="cms-section-heading"><h2>Inventory</h2></div>
+                    <div id="product-list" class="project-list cms-project-list"></div>
+                </section>
+
+                <section class="cms-module" data-admin-module-panel="theme" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Design system</span><h1>Theme</h1></div></div>
+                    <div class="cms-editor cms-theme-editor">
+                        <p class="cms-note">Controlled design tokens. Preview applies to this admin session only; site-wide saving is not connected.</p>
+                        <form class="cms-form" id="theme-form">
+                            <label><span>Primary / accent color</span><input type="color" name="accent" value="#c86f52"></label>
+                            <label><span>Page background</span><input type="color" name="background" value="#fffaf6"></label>
+                            <label><span>Surface color</span><input type="color" name="surface" value="#ffffff"></label>
+                            <label><span>Primary text</span><input type="color" name="text" value="#3d2925"></label>
+                            <label><span>Button corner radius</span><select name="radius"><option value="2px">Square</option><option value="4px" selected>Compact</option><option value="8px">Soft</option><option value="999px">Pill</option></select></label>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview tokens</button><button type="reset" class="cms-button cms-button-subtle" data-theme-reset>Reset preview</button></div>
+                        </form>
                     </div>
-                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save project</button><button type="button" class="btn btn-secondary" data-cancel-project>Cancel</button></div>
-                </form>
-            </section>
+                </section>
 
-            <section class="admin-panel admin-social-panel">
-                <h2>Social links</h2>
-                <form id="social-form" class="admin-form">
-                    <label>
-                        <span>Instagram</span>
-                        <input type="url" name="instagram" placeholder="https://instagram.com/yourhandle">
-                    </label>
-                    <label>
-                        <span>Facebook</span>
-                        <input type="url" name="facebook" placeholder="https://facebook.com/yourpage">
-                    </label>
-                    <label>
-                        <span>Twitter</span>
-                        <input type="url" name="twitter" placeholder="https://twitter.com/yourhandle">
-                    </label>
-                    <label>
-                        <span>YouTube</span>
-                        <input type="url" name="youtube" placeholder="https://youtube.com/@yourchannel">
-                    </label>
-                    <button type="submit" class="btn btn-primary">Save links</button>
-                </form>
-            </section>
-
-            <section class="admin-panel admin-list-panel portfolio-projects-list">
-                <h2>Saved projects</h2>
-                <div id="project-list" class="project-list"></div>
-            </section>
-        </div>
-
-        <div class="admin-shop-panel" data-admin-panel="products" hidden>
-            <section class="admin-panel">
-                <h2 data-product-form-title>Add shop product</h2>
-                <form id="product-form" class="admin-form">
-                    <input type="hidden" name="id">
-                    <label><span>SKU</span><input name="sku" required placeholder="PRINT-001"></label>
-                    <label><span>Product title</span><input name="title" required></label>
-                    <label><span>Product image</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-                    <label><span>Image URL</span><input type="url" name="image" placeholder="https://example.com/product.jpg"></label>
-                    <label><span>Description</span><textarea name="description" rows="3" required></textarea></label>
-                    <label><span>Price</span><input type="number" name="price" min="0" step="0.01" required></label>
-                    <label><span>Stock</span><input type="number" name="stock" min="0" step="1" required></label>
-                    <div class="admin-form-actions"><button type="submit" class="btn btn-primary">Save product</button><button type="button" class="btn btn-secondary" data-cancel-product hidden>Cancel edit</button></div>
-                </form>
-            </section>
-            <section class="admin-panel admin-list-panel">
-                <h2>Shop inventory</h2>
-                <div id="product-list" class="project-list"></div>
-            </section>
-        </div>
-
+                <section class="cms-module" data-admin-module-panel="settings" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Configuration</span><h1>Settings</h1></div></div>
+                    <section class="cms-editor">
+                        <div class="cms-section-heading"><h2>Social links</h2></div>
+                        <form id="social-form" class="cms-form cms-settings-form">
+                            <label><span>Instagram</span><input type="url" name="instagram" placeholder="https://instagram.com/yourhandle"></label>
+                            <label><span>Facebook</span><input type="url" name="facebook" placeholder="https://facebook.com/yourpage"></label>
+                            <label><span>Twitter</span><input type="url" name="twitter" placeholder="https://twitter.com/yourhandle"></label>
+                            <label><span>YouTube</span><input type="url" name="youtube" placeholder="https://youtube.com/@yourchannel"></label>
+                            <button type="submit" class="cms-button cms-button-primary">Save links</button>
+                        </form>
+                    </section>
+                </section>
+            </div>
         </div>
     </main>
-
-    <footer class="footer">
-        <p>© 2026 Dyndel Pino</p>
-    </footer>
 
     <script src="script.js"></script>
 </body>

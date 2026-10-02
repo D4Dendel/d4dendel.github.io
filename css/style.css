@@ -2356,6 +2356,22 @@ body.modal-is-open {
 }
 
 @media (max-width: 760px) {
+    body[data-page="home"] .hero-copy h1 {
+        max-width: 100%;
+        margin-inline: auto;
+        font-size: 2.5rem;
+        line-height: 1.08;
+        text-align: center;
+    }
+
+    body[data-page="home"] .typed-slot {
+        margin-inline: auto;
+    }
+
+    body[data-page="home"] .mobile-headline-break {
+        display: block;
+    }
+
     .art-modal {
         padding: 14px;
     }
@@ -2589,6 +2605,31 @@ body.modal-is-open {
 
     .category-hero h1 {
         font-size: 2.5rem;
+    }
+}
+
+.mobile-headline-break {
+    display: none;
+}
+
+@media (max-width: 360px) {
+    body[data-page="home"] .hero-copy h1 {
+        font-size: 2.3rem;
+    }
+
+    .social-section .social-links {
+        gap: 8px;
+    }
+
+    .social-section .social-links a {
+        width: 60px;
+        min-width: 60px;
+        height: 60px;
+    }
+
+    .social-section .social-links img {
+        width: 50px;
+        height: 50px;
     }
 }
 

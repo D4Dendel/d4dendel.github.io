@@ -339,6 +339,13 @@ const cmsRequest = async (action, options = {}) => {
 
 const projectList = document.getElementById('project-list');
 const projectModal = document.querySelector('[data-project-modal]');
+let cmsProjects = [];
+
+const isHomeVisible = (value) => value === true || value === 1 || value === '1';
+const normalizeProjectVisibility = (project) => ({
+  ...project,
+  showHome: project.showHome === undefined ? true : isHomeVisible(project.showHome)
+});
 
 const adminLoginForm = document.getElementById('admin-login-form');
 const adminLoginPanel = document.getElementById('admin-login-panel');
@@ -361,6 +368,7 @@ const restoreCmsSession = async () => {
       adminLoginPanel.hidden = true;
       if (adminContent) adminContent.hidden = false;
       renderProjectList();
+      if (useCmsApi) renderAdminProducts();
     }
   } catch (error) {
     if (adminLoginMessage) adminLoginMessage.textContent = 'CMS connection unavailable.';
@@ -379,6 +387,7 @@ if (adminLoginForm) {
         if (adminLoginMessage) adminLoginMessage.textContent = '';
         updateAdminVisibility();
         renderProjectList();
+        if (useCmsApi) renderAdminProducts();
       } catch (error) {
         if (adminLoginMessage) adminLoginMessage.textContent = error.message;
       }
@@ -397,6 +406,7 @@ if (adminLoginForm) {
     if (adminLoginMessage) adminLoginMessage.textContent = '';
     updateAdminVisibility();
     renderProjectList();
+    if (useCmsApi) renderAdminProducts();
   });
 }
 
@@ -409,10 +419,10 @@ document.getElementById('admin-logout')?.addEventListener('click', async () => {
 });
 
 const renderProjectList = async () => {
-  let projects = getStoredData(STORAGE_KEYS.projects, defaultProjects);
+  let projects = getStoredData(STORAGE_KEYS.projects, defaultProjects).map(normalizeProjectVisibility);
   if (useCmsApi) {
     try {
-      projects = (await cmsRequest('projects')).projects;
+      projects = (await cmsRequest('projects')).projects.map(normalizeProjectVisibility);
     } catch (error) {
       if (projectList) projectList.innerHTML = `<p class="admin-note">${error.message}</p>`;
       return;
@@ -420,57 +430,97 @@ const renderProjectList = async () => {
   }
 
   if (!projectList) return;
+  cmsProjects = projects;
+  const projectCount = document.querySelector('[data-dashboard-project-count]');
+  const homeProjectCount = document.querySelector('[data-dashboard-home-count]');
+  if (projectCount) projectCount.textContent = String(projects.length);
 
-  projectList.innerHTML = projects.map((project) => `
-    <article class="project-item" data-project-item>
-      <img src="${project.image}" alt="${project.altText || project.title}">
-      <div class="project-copy">
-        <span class="project-badge">#${Number(project.sortOrder ?? project.sort_order ?? 0)} &middot; ${project.category}</span>
-        <h3>${project.title}</h3>
-        <p>${project.description}</p>
-        <div class="admin-item-actions"><button class="btn btn-secondary" type="button" data-edit-project="${project.id}">Edit</button><button class="btn btn-danger" type="button" data-delete-project="${project.id}">Delete</button></div>
-        <label class="project-toggle">
-          <input type="checkbox" data-toggle-home="${useCmsApi ? project.id : projects.indexOf(project)}" ${project.showHome !== false ? 'checked' : ''}>
-          <span>Show on home</span>
-        </label>
-      </div>
-    </article>
-  `).join('');
-
-  projectList.querySelectorAll('[data-toggle-home]').forEach((toggle) => {
-    toggle.addEventListener('change', () => {
-      const index = Number(toggle.dataset.toggleHome);
-      if (useCmsApi) {
-        cmsRequest('visibility', { method: 'POST', body: new URLSearchParams({ id: toggle.dataset.toggleHome, showHome: toggle.checked ? '1' : '0' }) })
-          .catch((error) => { toggle.checked = !toggle.checked; window.alert(error.message); });
-        return;
-      }
-      const updatedProjects = getStoredData(STORAGE_KEYS.projects, defaultProjects);
-      if (!updatedProjects[index]) return;
-      updatedProjects[index].showHome = toggle.checked;
-      saveData(STORAGE_KEYS.projects, updatedProjects);
-      renderManagedProjectViews();
+  const renderFilteredProjects = () => {
+    const search = (document.getElementById('project-search')?.value || '').trim().toLocaleLowerCase();
+    const category = document.getElementById('project-category-filter')?.value || '';
+    const homeFilter = document.getElementById('project-home-filter')?.value || '';
+    const sort = document.getElementById('project-sort')?.value || 'order-asc';
+    const filteredProjects = cmsProjects.filter((project) => {
+      const matchesSearch = !search || `${project.title} ${project.description}`.toLocaleLowerCase().includes(search);
+      const matchesCategory = !category || project.category === category;
+      const matchesHome = homeFilter === '' || String(Number(isHomeVisible(project.showHome))) === homeFilter;
+      return matchesSearch && matchesCategory && matchesHome;
     });
+    filteredProjects.sort((first, second) => {
+      if (sort === 'title-asc') return first.title.localeCompare(second.title);
+      if (sort === 'title-desc') return second.title.localeCompare(first.title);
+      const firstOrder = Number(first.sortOrder ?? first.sort_order ?? 0);
+      const secondOrder = Number(second.sortOrder ?? second.sort_order ?? 0);
+      return sort === 'order-desc' ? secondOrder - firstOrder : firstOrder - secondOrder;
+    });
+    projectList.innerHTML = filteredProjects.map((project) => `
+      <article class="project-item" data-project-item>
+        <img src="${project.image}" alt="${project.altText || project.title}">
+        <div class="project-copy">
+          <span class="project-badge">#${Number(project.sortOrder ?? project.sort_order ?? 0)} &middot; ${project.category}</span>
+          <h3>${project.title}</h3>
+          <p>${project.description}</p>
+          <div class="admin-item-actions"><button class="btn btn-secondary" type="button" data-edit-project="${project.id}">Edit</button><button class="btn btn-danger" type="button" data-delete-project="${project.id}">Delete</button></div>
+          <label class="project-toggle">
+            <input type="checkbox" data-toggle-home="${useCmsApi ? project.id : cmsProjects.indexOf(project)}" ${isHomeVisible(project.showHome) ? 'checked' : ''}>
+            <span>Show on home</span>
+          </label>
+        </div>
+      </article>
+    `).join('') || '<p class="cms-note">No projects match these filters.</p>';
+    const visibleCount = cmsProjects.filter((project) => isHomeVisible(project.showHome)).length;
+    if (homeProjectCount) homeProjectCount.textContent = String(visibleCount);
+  };
+
+  ['project-search', 'project-category-filter', 'project-home-filter', 'project-sort'].forEach((id) => {
+    const control = document.getElementById(id);
+    if (!control) return;
+    control[control.type === 'search' ? 'oninput' : 'onchange'] = renderFilteredProjects;
   });
-  projectList.querySelectorAll('[data-edit-project]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const project = projects.find((item) => Number(item.id) === Number(button.dataset.editProject));
+
+  projectList.onchange = async (event) => {
+    const toggle = event.target.closest('[data-toggle-home]');
+    if (!toggle) return;
+    const project = useCmsApi
+      ? cmsProjects.find((item) => Number(item.id) === Number(toggle.dataset.toggleHome))
+      : cmsProjects[Number(toggle.dataset.toggleHome)];
+    if (!project) return;
+    const previousValue = project.showHome;
+    project.showHome = toggle.checked;
+    if (useCmsApi) {
+      try {
+        await cmsRequest('visibility', { method: 'POST', body: new URLSearchParams({ id: toggle.dataset.toggleHome, showHome: toggle.checked ? '1' : '0' }) });
+      } catch (error) {
+        project.showHome = previousValue;
+        window.alert(error.message);
+      }
+    } else {
+      saveData(STORAGE_KEYS.projects, cmsProjects);
+      renderManagedProjectViews();
+    }
+    renderFilteredProjects();
+  };
+
+  projectList.onclick = async (event) => {
+    const editButton = event.target.closest('[data-edit-project]');
+    if (editButton) {
+      const project = cmsProjects.find((item) => Number(item.id) === Number(editButton.dataset.editProject));
       if (!project || !projectForm) return;
       openProjectModal(project);
-      document.querySelector('[data-admin-tab="projects"]')?.click();
+      document.querySelector('[data-admin-module="projects"]')?.click();
       projectForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  });
-  projectList.querySelectorAll('[data-delete-project]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      if (!window.confirm('Delete this project?')) return;
-      try {
-        await cmsRequest('delete-project', { method: 'POST', body: new URLSearchParams({ id: button.dataset.deleteProject }) });
-        await renderProjectList();
-        await renderManagedProjectViews();
-      } catch (error) { window.alert(error.message); }
-    });
-  });
+      return;
+    }
+    const deleteButton = event.target.closest('[data-delete-project]');
+    if (!deleteButton || !window.confirm('Delete this project?')) return;
+    try {
+      await cmsRequest('delete-project', { method: 'POST', body: new URLSearchParams({ id: deleteButton.dataset.deleteProject }) });
+      await renderProjectList();
+      await renderManagedProjectViews();
+    } catch (error) { window.alert(error.message); }
+  };
+
+  renderFilteredProjects();
 };
 
 const projectForm = document.getElementById('project-form');
@@ -543,7 +593,7 @@ const renderManagedProjectViews = async () => {
     try {
       projects = (await cmsRequest('projects')).projects.map((project) => ({
         ...project,
-        showHome: project.showHome !== false && project.showHome !== 0 && project.showHome !== '0'
+        showHome: project.showHome === true || project.showHome === 1 || project.showHome === '1'
       }));
     } catch (error) {
       return;
@@ -580,6 +630,8 @@ const renderAdminProducts = async () => {
   if (!adminProductList) return;
   try {
     const products = (await cmsRequest('admin-products')).products;
+    const productCount = document.querySelector('[data-dashboard-product-count]');
+    if (productCount) productCount.textContent = String(products.length);
     adminProductList.innerHTML = products.map((product) => `
       <article class="project-item">
         <img src="${product.image}" alt="${product.title}">
@@ -607,10 +659,18 @@ const renderAdminProducts = async () => {
   } catch (error) { adminProductList.innerHTML = `<p class="admin-note">${error.message}</p>`; }
 };
 
-document.querySelectorAll('[data-admin-tab]').forEach((tab) => tab.addEventListener('click', () => {
-  document.querySelectorAll('[data-admin-tab]').forEach((item) => item.classList.toggle('is-active', item === tab));
-  document.querySelectorAll('[data-admin-panel]').forEach((panel) => { panel.hidden = panel.dataset.adminPanel !== tab.dataset.adminTab; });
-  if (tab.dataset.adminTab === 'products') renderAdminProducts();
+document.querySelectorAll('[data-admin-module]').forEach((control) => control.addEventListener('click', () => {
+  const moduleName = control.dataset.adminModule;
+  document.querySelectorAll('[data-admin-module]').forEach((item) => {
+    const active = item === control;
+    item.classList.toggle('is-active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('[data-admin-module-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.adminModulePanel !== moduleName;
+  });
+  if (moduleName === 'shop') renderAdminProducts();
 }));
 document.querySelector('[data-cancel-project]')?.addEventListener('click', () => {
   projectForm?.reset();
@@ -926,15 +986,17 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
 
   if (isMobileViewport) {
     tabletCard?.addEventListener('click', (event) => {
-      if (!tabletDesk.hidden || event.target.closest('button, a, input, textarea, select, .tablet-desk')) return;
+      if (event.target.closest('button, a, input, textarea, select, .tablet-desk')) return;
       event.preventDefault();
       event.stopPropagation();
-      setTabletMode(true);
+      setTabletMode(tabletDesk.hidden);
     });
   }
 
-  tabletCard?.addEventListener('pointerenter', () => setTabletMode(true));
-  tabletCard?.addEventListener('pointerleave', () => setTabletMode(false));
+  if (!isMobileViewport && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    tabletCard?.addEventListener('pointerenter', () => setTabletMode(true));
+    tabletCard?.addEventListener('pointerleave', () => setTabletMode(false));
+  }
 
   tabletCanvas.addEventListener('pointerdown', (event) => {
     tabletDrawing = true;
@@ -1084,6 +1146,25 @@ document.querySelectorAll('[data-project-view]').forEach((control) => control.ad
   document.querySelectorAll('[data-project-view]').forEach((item) => item.classList.toggle('is-active', item === control));
   projectList?.classList.toggle('is-list-view', control.dataset.projectView === 'list');
 }));
+
+const themeForm = document.getElementById('theme-form');
+const applyThemePreview = () => {
+  if (!themeForm) return;
+  const formData = new FormData(themeForm);
+  document.body.style.setProperty('--cms-accent', formData.get('accent'));
+  document.body.style.setProperty('--cms-bg', formData.get('background'));
+  document.body.style.setProperty('--cms-surface', formData.get('surface'));
+  document.body.style.setProperty('--cms-text', formData.get('text'));
+  document.body.style.setProperty('--cms-radius', formData.get('radius'));
+};
+
+themeForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  applyThemePreview();
+});
+themeForm?.addEventListener('reset', () => window.setTimeout(() => {
+  ['--cms-accent', '--cms-bg', '--cms-surface', '--cms-text', '--cms-radius'].forEach((token) => document.body.style.removeProperty(token));
+}, 0));
 
 const socialForm = document.getElementById('social-form');
 if (socialForm) {
