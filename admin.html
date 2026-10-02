@@ -67,6 +67,7 @@
                         <label><span>Sort by</span><select id="project-sort"><option value="order-asc">Order, low to high</option><option value="order-desc">Order, high to low</option><option value="title-asc">Title, A to Z</option><option value="title-desc">Title, Z to A</option></select></label>
                         <div class="cms-view-switch" role="group" aria-label="Project layout"><button type="button" class="is-active" data-project-view="grid" aria-label="Grid view" title="Grid view">Grid</button><button type="button" data-project-view="list" aria-label="List view" title="List view">List</button></div>
                     </div>
+                    <div class="cms-list-head" data-project-list-head hidden aria-hidden="true"><span>Preview</span><span>Order</span><span>Category</span><span>Project</span><span>Description</span><span>Homepage</span><span>Actions</span></div>
                     <section class="cms-editor" data-project-modal hidden>
                         <div class="cms-section-heading"><div><span class="cms-kicker">Project details</span><h2 data-project-form-title>Add project</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-project-modal aria-label="Close project editor">Close</button></div>
                         <form id="project-form" class="cms-form">
@@ -94,8 +95,25 @@
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="content" hidden>
-                    <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div></div>
-                    <div class="cms-empty-state"><h2>Content management</h2><p>This module is reserved for future blog, card, and editorial content management.</p></div>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div><button type="button" class="cms-button cms-button-primary" data-open-content-editor>New entry</button></div>
+                    <section class="cms-editor cms-content-editor" data-content-editor hidden>
+                        <div class="cms-section-heading"><div><span class="cms-kicker">Unpublished workspace</span><h2>Create content entry</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Close</button></div>
+                        <p class="cms-note">Content storage is not configured yet. This form is a field/layout preview only; entries will not be saved.</p>
+                        <form class="cms-form cms-content-form" id="content-form">
+                            <label><span>Title</span><input name="title" maxlength="180" required></label>
+                            <label><span>Cover image</span><input type="url" name="coverImage" placeholder="https://example.com/cover.jpg"></label>
+                            <label><span>Type</span><select name="type"><option>Blog</option><option>News</option><option>Update</option><option>Announcement</option></select></label>
+                            <label><span>Publish date</span><input type="date" name="publishDate"></label>
+                            <label class="cms-content-wide"><span>Excerpt</span><textarea name="excerpt" rows="2" maxlength="320"></textarea></label>
+                            <label class="cms-content-wide"><span>Full content</span><textarea name="body" rows="7"></textarea></label>
+                            <label><span>Status</span><select name="status"><option>Draft</option><option>Published</option></select></label>
+                            <label><span>Card size</span><select name="cardSize"><option>Standard</option><option>Wide</option><option>Featured</option></select></label>
+                            <div class="cms-content-options"><label><input type="checkbox" name="featured"><span>Featured</span></label><label><input type="checkbox" name="showHome"><span>Show on homepage</span></label><label><input type="checkbox" name="showCard" checked><span>Show as card</span></label></div>
+                            <div class="admin-form-actions cms-content-wide"><button type="submit" class="cms-button cms-button-primary">Save entry</button><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Cancel</button></div>
+                            <p class="cms-form-message cms-content-wide" data-content-form-message role="status"></p>
+                        </form>
+                    </section>
+                    <div class="cms-empty-state" data-content-empty><h2>No content entries</h2><p>Blog posts, news, updates, and announcements will appear here once content storage is approved and implemented.</p></div>
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="shop" hidden>
@@ -128,8 +146,12 @@
                             <label><span>Surface color</span><input type="color" name="surface" value="#ffffff"></label>
                             <label><span>Primary text</span><input type="color" name="text" value="#3d2925"></label>
                             <label><span>Button corner radius</span><select name="radius"><option value="2px">Square</option><option value="4px" selected>Compact</option><option value="8px">Soft</option><option value="999px">Pill</option></select></label>
-                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview tokens</button><button type="reset" class="cms-button cms-button-subtle" data-theme-reset>Reset preview</button></div>
+                            <label><span>Gallery layout</span><select name="galleryLayout"><option value="uniform">Uniform Grid</option><option value="masonry">Masonry</option><option value="editorial">Editorial / Mixed</option><option value="clean">Clean Grid</option></select></label>
+                            <label><span>Card/image edges</span><select name="galleryEdge"><option value="rounded">Rounded</option><option value="slight">Slight</option><option value="square">Square</option><option value="none">None / frameless</option></select></label>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview Changes</button><button type="button" class="cms-button" disabled title="Theme persistence requires an approved settings schema and API">Save &amp; Publish</button><button type="reset" class="cms-button cms-button-subtle" data-theme-reset>Reset to Default</button></div>
                         </form>
+                        <p class="cms-note cms-theme-save-note">Publishing will be enabled after the theme settings storage and validated API are approved.</p>
+                        <div class="cms-theme-preview-wrap"><div class="cms-section-heading"><h2>Gallery preview</h2><span class="cms-note" data-gallery-preview-note></span></div><div class="cms-gallery-preview" data-gallery-theme-preview data-gallery-layout="uniform" data-gallery-edge="rounded"></div></div>
                     </div>
                 </section>
 

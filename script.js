@@ -457,19 +457,20 @@ const renderProjectList = async () => {
       <article class="project-item" data-project-item>
         <img src="${project.image}" alt="${project.altText || project.title}">
         <div class="project-copy">
-          <span class="project-badge">#${Number(project.sortOrder ?? project.sort_order ?? 0)} &middot; ${project.category}</span>
-          <h3>${project.title}</h3>
-          <p>${project.description}</p>
+          <div class="project-meta"><span class="project-order">#${Number(project.sortOrder ?? project.sort_order ?? 0)}</span><span class="project-category">${project.category}</span></div>
+          <div class="project-summary"><h3>${project.title}</h3><p>${project.description}</p></div>
           <div class="admin-item-actions"><button class="btn btn-secondary" type="button" data-edit-project="${project.id}">Edit</button><button class="btn btn-danger" type="button" data-delete-project="${project.id}">Delete</button></div>
-          <label class="project-toggle">
+          <label class="project-toggle" aria-label="Homepage visibility for ${project.title}">
             <input type="checkbox" data-toggle-home="${useCmsApi ? project.id : cmsProjects.indexOf(project)}" ${isHomeVisible(project.showHome) ? 'checked' : ''}>
-            <span>Show on home</span>
+            <span class="project-toggle-track" aria-hidden="true"></span>
+            <span class="project-toggle-label">${isHomeVisible(project.showHome) ? 'On home' : 'Hidden'}</span>
           </label>
         </div>
       </article>
     `).join('') || '<p class="cms-note">No projects match these filters.</p>';
     const visibleCount = cmsProjects.filter((project) => isHomeVisible(project.showHome)).length;
     if (homeProjectCount) homeProjectCount.textContent = String(visibleCount);
+    renderGalleryThemePreview();
   };
 
   ['project-search', 'project-category-filter', 'project-home-filter', 'project-sort'].forEach((id) => {
@@ -1145,17 +1146,63 @@ document.querySelector('[data-cancel-project]')?.addEventListener('click', close
 document.querySelectorAll('[data-project-view]').forEach((control) => control.addEventListener('click', () => {
   document.querySelectorAll('[data-project-view]').forEach((item) => item.classList.toggle('is-active', item === control));
   projectList?.classList.toggle('is-list-view', control.dataset.projectView === 'list');
+  const listHead = document.querySelector('[data-project-list-head]');
+  if (listHead) listHead.hidden = control.dataset.projectView !== 'list';
 }));
 
 const themeForm = document.getElementById('theme-form');
+const galleryThemePreview = document.querySelector('[data-gallery-theme-preview]');
+const allowedThemeValues = {
+  radius: new Set(['2px', '4px', '8px', '999px']),
+  galleryLayout: new Set(['uniform', 'masonry', 'editorial', 'clean']),
+  galleryEdge: new Set(['rounded', 'slight', 'square', 'none'])
+};
+
+const renderGalleryThemePreview = () => {
+  if (!galleryThemePreview) return;
+  const previewProjects = cmsProjects.slice(0, 6);
+  galleryThemePreview.replaceChildren();
+  previewProjects.forEach((project) => {
+    const card = document.createElement('article');
+    card.className = 'cms-gallery-preview-card';
+    if (['standard', 'wide', 'tall', 'featured'].includes(project.displaySize)) {
+      card.dataset.displaySize = project.displaySize;
+    }
+    const image = document.createElement('img');
+    image.src = project.image;
+    image.alt = project.altText || project.title;
+    const copy = document.createElement('div');
+    const category = document.createElement('span');
+    category.textContent = project.category;
+    const title = document.createElement('strong');
+    title.textContent = project.title;
+    copy.append(category, title);
+    card.append(image, copy);
+    galleryThemePreview.append(card);
+  });
+  const note = document.querySelector('[data-gallery-preview-note]');
+  if (note) {
+    note.textContent = galleryThemePreview.dataset.galleryLayout === 'editorial'
+      ? 'Emphasis requires an explicit display size on each project.'
+      : `${previewProjects.length} current projects`;
+  }
+};
+
 const applyThemePreview = () => {
   if (!themeForm) return;
   const formData = new FormData(themeForm);
-  document.body.style.setProperty('--cms-accent', formData.get('accent'));
-  document.body.style.setProperty('--cms-bg', formData.get('background'));
-  document.body.style.setProperty('--cms-surface', formData.get('surface'));
-  document.body.style.setProperty('--cms-text', formData.get('text'));
-  document.body.style.setProperty('--cms-radius', formData.get('radius'));
+  const colors = ['accent', 'background', 'surface', 'text'];
+  colors.forEach((field) => {
+    const value = String(formData.get(field) || '');
+    if (/^#[\da-f]{6}$/i.test(value)) document.body.style.setProperty(`--cms-${field === 'accent' ? 'accent' : field === 'background' ? 'bg' : field}`, value);
+  });
+  ['radius', 'galleryLayout', 'galleryEdge'].forEach((field) => {
+    const value = String(formData.get(field) || '');
+    if (!allowedThemeValues[field].has(value)) return;
+    if (field === 'radius') document.body.style.setProperty('--cms-radius', value);
+    else galleryThemePreview.dataset[field === 'galleryLayout' ? 'galleryLayout' : 'galleryEdge'] = value;
+  });
+  renderGalleryThemePreview();
 };
 
 themeForm?.addEventListener('submit', (event) => {
@@ -1164,7 +1211,30 @@ themeForm?.addEventListener('submit', (event) => {
 });
 themeForm?.addEventListener('reset', () => window.setTimeout(() => {
   ['--cms-accent', '--cms-bg', '--cms-surface', '--cms-text', '--cms-radius'].forEach((token) => document.body.style.removeProperty(token));
+  if (galleryThemePreview) {
+    galleryThemePreview.dataset.galleryLayout = 'uniform';
+    galleryThemePreview.dataset.galleryEdge = 'rounded';
+  }
+  renderGalleryThemePreview();
 }, 0));
+
+document.querySelector('[data-open-content-editor]')?.addEventListener('click', () => {
+  const editor = document.querySelector('[data-content-editor]');
+  if (editor) editor.hidden = false;
+});
+document.querySelectorAll('[data-close-content-editor]').forEach((button) => button.addEventListener('click', () => {
+  const editor = document.querySelector('[data-content-editor]');
+  const form = document.getElementById('content-form');
+  const message = document.querySelector('[data-content-form-message]');
+  if (editor) editor.hidden = true;
+  form?.reset();
+  if (message) message.textContent = '';
+}));
+document.getElementById('content-form')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const message = document.querySelector('[data-content-form-message]');
+  if (message) message.textContent = 'Nothing was saved. Content storage and API support require approval and implementation.';
+});
 
 const socialForm = document.getElementById('social-form');
 if (socialForm) {

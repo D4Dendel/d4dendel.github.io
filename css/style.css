@@ -2763,6 +2763,80 @@ body.modal-is-open {
     background-size: 18px 18px;
 }
 
+.gallery-grid[data-gallery-layout="masonry"] {
+    display: block;
+    columns: 3;
+    column-gap: 22px;
+}
+
+.gallery-grid[data-gallery-layout="masonry"] > .gallery-card {
+    display: inline-block;
+    width: 100%;
+    margin: 0 0 22px;
+    break-inside: avoid;
+}
+
+.gallery-grid[data-gallery-layout="masonry"] .featured-image {
+    height: auto;
+    object-fit: contain;
+}
+
+.gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="wide"] {
+    grid-column: span 2;
+}
+
+.gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="tall"] {
+    grid-row: span 2;
+}
+
+.gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="featured"] {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+
+.gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="tall"] .featured-image,
+.gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="featured"] .featured-image {
+    height: 100%;
+    min-height: 460px;
+}
+
+.gallery-grid[data-gallery-edge="rounded"] > .gallery-card {
+    border-radius: 22px;
+}
+
+.gallery-grid[data-gallery-edge="slight"] > .gallery-card {
+    border-radius: 6px;
+}
+
+.gallery-grid[data-gallery-edge="square"] > .gallery-card,
+.gallery-grid[data-gallery-edge="none"] > .gallery-card {
+    border-radius: 0;
+}
+
+.gallery-grid[data-gallery-edge="none"] > .gallery-card {
+    border: 0;
+    box-shadow: none;
+}
+
+.gallery-grid[data-gallery-layout="clean"] > .gallery-card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+@media (max-width: 900px) {
+    .gallery-grid[data-gallery-layout="masonry"] {
+        columns: 2;
+    }
+}
+
+@media (max-width: 600px) {
+    .gallery-grid[data-gallery-layout="masonry"] {
+        columns: 1;
+    }
+}
+
 @keyframes sketchFloat {
     from { transform: translate3d(0, 0, 0) rotate(-4deg); }
     to { transform: translate3d(12px, -18px, 0) rotate(5deg); }
