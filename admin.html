@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/admin.css">
+    <link rel="stylesheet" href="css/style.css?v=20261002.5">
+    <link rel="stylesheet" href="css/admin.css?v=20261002.5">
 </head>
 <body data-page="admin" class="cms-app">
     <header class="header cms-topbar">
@@ -82,6 +82,7 @@
                                     <label><span>Project title</span><input type="text" name="title" placeholder="e.g. Blue Hour Studio" required></label>
                                     <label><span>Category</span><select name="category" required><option value="Illustration">Illustration</option><option value="Graphic Design">Graphic Design</option><option value="Portraits">Portraits</option><option value="Logos">Logos</option></select></label>
                                     <label><span>Sort order</span><input type="number" name="sortOrder" min="0" step="1" value="0" required></label>
+                                    <label><span>Display size</span><select name="displaySize"><option value="standard">Standard</option><option value="wide">Wide</option><option value="tall">Tall</option><option value="featured">Featured</option></select></label>
                                     <label><span>Slug</span><input type="text" name="slug" placeholder="blue-hour-studio" pattern="[A-Za-z0-9-]+"></label>
                                     <label><span>Alt text</span><input type="text" name="altText" maxlength="255" placeholder="Describe the project artwork"></label>
                                     <label><span>Description</span><textarea name="description" rows="4" placeholder="Enter project details" required></textarea></label>
@@ -97,23 +98,26 @@
                 <section class="cms-module" data-admin-module-panel="content" hidden>
                     <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div><button type="button" class="cms-button cms-button-primary" data-open-content-editor>New entry</button></div>
                     <section class="cms-editor cms-content-editor" data-content-editor hidden>
-                        <div class="cms-section-heading"><div><span class="cms-kicker">Unpublished workspace</span><h2>Create content entry</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Close</button></div>
-                        <p class="cms-note">Content storage is not configured yet. This form is a field/layout preview only; entries will not be saved.</p>
+                        <div class="cms-section-heading"><div><span class="cms-kicker">Content entry</span><h2 data-content-form-title>Create content entry</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Close</button></div>
                         <form class="cms-form cms-content-form" id="content-form">
+                            <input type="hidden" name="id">
                             <label><span>Title</span><input name="title" maxlength="180" required></label>
-                            <label><span>Cover image</span><input type="url" name="coverImage" placeholder="https://example.com/cover.jpg"></label>
-                            <label><span>Type</span><select name="type"><option>Blog</option><option>News</option><option>Update</option><option>Announcement</option></select></label>
+                            <label><span>Slug</span><input name="slug" maxlength="180" placeholder="generated from title"></label>
+                            <label><span>Upload cover image</span><input type="file" name="coverImageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+                            <div class="cms-content-cover-preview" data-content-cover-preview hidden></div>
+                            <label><span>External image URL (optional)</span><input type="url" name="coverImage" placeholder="https://example.com/cover.jpg"><small>Leave blank when uploading an image from your device.</small></label>
+                            <label><span>Type</span><select name="type"><option value="blog">Blog</option><option value="news">News</option><option value="update">Update</option><option value="announcement">Announcement</option></select></label>
                             <label><span>Publish date</span><input type="date" name="publishDate"></label>
                             <label class="cms-content-wide"><span>Excerpt</span><textarea name="excerpt" rows="2" maxlength="320"></textarea></label>
                             <label class="cms-content-wide"><span>Full content</span><textarea name="body" rows="7"></textarea></label>
-                            <label><span>Status</span><select name="status"><option>Draft</option><option>Published</option></select></label>
-                            <label><span>Card size</span><select name="cardSize"><option>Standard</option><option>Wide</option><option>Featured</option></select></label>
+                            <label><span>Status</span><select name="status"><option value="draft">Draft</option><option value="published">Published</option></select></label>
+                            <label><span>Card size</span><select name="cardSize"><option value="standard">Standard</option><option value="wide">Wide</option><option value="featured">Featured</option></select></label>
                             <div class="cms-content-options"><label><input type="checkbox" name="featured"><span>Featured</span></label><label><input type="checkbox" name="showHome"><span>Show on homepage</span></label><label><input type="checkbox" name="showCard" checked><span>Show as card</span></label></div>
-                            <div class="admin-form-actions cms-content-wide"><button type="submit" class="cms-button cms-button-primary">Save entry</button><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Cancel</button></div>
+                            <div class="admin-form-actions cms-content-wide"><button type="submit" class="cms-button cms-button-primary" data-content-save>Save Draft</button><button type="button" class="cms-button" data-content-publish>Publish</button><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Cancel</button></div>
                             <p class="cms-form-message cms-content-wide" data-content-form-message role="status"></p>
                         </form>
                     </section>
-                    <div class="cms-empty-state" data-content-empty><h2>No content entries</h2><p>Blog posts, news, updates, and announcements will appear here once content storage is approved and implemented.</p></div>
+                    <div id="content-list" class="cms-content-list"></div>
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="shop" hidden>
@@ -139,18 +143,18 @@
                 <section class="cms-module" data-admin-module-panel="theme" hidden>
                     <div class="cms-page-heading"><div><span class="cms-kicker">Design system</span><h1>Theme</h1></div></div>
                     <div class="cms-editor cms-theme-editor">
-                        <p class="cms-note">Controlled design tokens. Preview applies to this admin session only; site-wide saving is not connected.</p>
+                        <p class="cms-note">Preview Changes affects this admin session. Save &amp; Publish applies validated tokens to the public site.</p>
                         <form class="cms-form" id="theme-form">
                             <label><span>Primary / accent color</span><input type="color" name="accent" value="#c86f52"></label>
-                            <label><span>Page background</span><input type="color" name="background" value="#fffaf6"></label>
-                            <label><span>Surface color</span><input type="color" name="surface" value="#ffffff"></label>
+                            <label><span>Page background</span><input type="color" name="background" value="#fff0e8"></label>
+                            <label><span>Surface color</span><input type="color" name="surface" value="#fff8f3"></label>
                             <label><span>Primary text</span><input type="color" name="text" value="#3d2925"></label>
-                            <label><span>Button corner radius</span><select name="radius"><option value="2px">Square</option><option value="4px" selected>Compact</option><option value="8px">Soft</option><option value="999px">Pill</option></select></label>
+                            <label><span>Button corner radius</span><select name="radius"><option value="2px">Square</option><option value="4px">Compact</option><option value="8px">Soft</option><option value="999px" selected>Pill</option></select></label>
                             <label><span>Gallery layout</span><select name="galleryLayout"><option value="uniform">Uniform Grid</option><option value="masonry">Masonry</option><option value="editorial">Editorial / Mixed</option><option value="clean">Clean Grid</option></select></label>
                             <label><span>Card/image edges</span><select name="galleryEdge"><option value="rounded">Rounded</option><option value="slight">Slight</option><option value="square">Square</option><option value="none">None / frameless</option></select></label>
-                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview Changes</button><button type="button" class="cms-button" disabled title="Theme persistence requires an approved settings schema and API">Save &amp; Publish</button><button type="reset" class="cms-button cms-button-subtle" data-theme-reset>Reset to Default</button></div>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview Changes</button><button type="button" class="cms-button" data-theme-publish disabled>Save &amp; Publish</button><button type="button" class="cms-button cms-button-subtle" data-theme-reset>Reset to Default</button></div>
                         </form>
-                        <p class="cms-note cms-theme-save-note">Publishing will be enabled after the theme settings storage and validated API are approved.</p>
+                        <p class="cms-note cms-theme-save-note" data-theme-message role="status">Loading published settings...</p>
                         <div class="cms-theme-preview-wrap"><div class="cms-section-heading"><h2>Gallery preview</h2><span class="cms-note" data-gallery-preview-note></span></div><div class="cms-gallery-preview" data-gallery-theme-preview data-gallery-layout="uniform" data-gallery-edge="rounded"></div></div>
                     </div>
                 </section>
@@ -172,6 +176,6 @@
         </div>
     </main>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=20261002.5"></script>
 </body>
 </html>

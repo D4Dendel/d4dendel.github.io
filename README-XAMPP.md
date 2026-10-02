@@ -12,6 +12,8 @@
 6. Ensure the `uploads` folder is writable by Apache.
 7. Open `http://localhost/dyndel-portfolio/admin.html`.
 
+For an existing installation, back up `dyndel_portfolio` first, then select that database in phpMyAdmin and import `migrations/20261002_theme_content_gallery.sql`. This additive migration adds `projects.display_size` with `standard` as its default and creates the Theme/Content tables; it does not recreate the database or modify shop/order tables. It is safe to run again.
+
 The admin form accepts image files and stores them in `uploads/`. Projects are stored in MySQL and are available through `api/index.php?action=projects`. The frontend uses the API automatically when served over HTTP; opening HTML files directly with `file://` keeps the existing browser-local fallback.
 
 Security notes:

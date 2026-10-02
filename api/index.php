@@ -6,6 +6,53 @@ require __DIR__ . '/config.php';
 
 $action = $_GET['action'] ?? 'projects';
 
+$themeDefaults = [
+    'accentColor' => '#c86f52',
+    'pageBackground' => '#fff0e8',
+    'surfaceColor' => '#fff8f3',
+    'primaryText' => '#3d2925',
+    'buttonRadius' => '999px',
+    'galleryLayout' => 'uniform',
+    'galleryEdge' => 'rounded'
+];
+
+$readTheme = static function () use ($themeDefaults): array {
+    try {
+        $row = db()->query('SELECT accent_color, page_background, surface_color, primary_text, button_radius, gallery_layout, gallery_edge FROM site_settings WHERE id = 1')->fetch();
+        if (!$row) return $themeDefaults;
+        $theme = [
+            'accentColor' => $row['accent_color'],
+            'pageBackground' => $row['page_background'],
+            'surfaceColor' => $row['surface_color'],
+            'primaryText' => $row['primary_text'],
+            'buttonRadius' => $row['button_radius'],
+            'galleryLayout' => $row['gallery_layout'],
+            'galleryEdge' => $row['gallery_edge']
+        ];
+        foreach (['accentColor', 'pageBackground', 'surfaceColor', 'primaryText'] as $key) {
+            if (!preg_match('/^#[0-9a-fA-F]{6}$/', (string)$theme[$key])) $theme[$key] = $themeDefaults[$key];
+        }
+        if (!in_array($theme['buttonRadius'], ['2px', '4px', '8px', '999px'], true)) $theme['buttonRadius'] = $themeDefaults['buttonRadius'];
+        if (!in_array($theme['galleryLayout'], ['uniform', 'masonry', 'editorial', 'clean'], true)) $theme['galleryLayout'] = $themeDefaults['galleryLayout'];
+        if (!in_array($theme['galleryEdge'], ['rounded', 'slight', 'square', 'none'], true)) $theme['galleryEdge'] = $themeDefaults['galleryEdge'];
+        return $theme;
+    } catch (Throwable $error) {
+        return $themeDefaults;
+    }
+};
+
+$postBoolean = static function (string $key): int {
+    $value = $_POST[$key] ?? '0';
+    if (in_array($value, ['1', 1, true, 'true', 'on'], true)) return 1;
+    if (in_array($value, ['0', 0, false, 'false', 'off', ''], true)) return 0;
+    json_response(['error' => "Invalid {$key} value."], 422);
+};
+
+$safeSlug = static function (string $value): string {
+    $slug = strtolower(trim((string)preg_replace('/[^a-z0-9]+/i', '-', $value), '-'));
+    return substr($slug, 0, 180);
+};
+
 if ($action === 'contact') {
     require_post();
     $name = request_string('name', 160);
@@ -76,9 +123,156 @@ if ($action === 'session' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     json_response(['authenticated' => !empty($_SESSION['admin_id'])]);
 }
 
+if ($action === 'theme' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Cache-Control: no-store, max-age=0');
+    json_response(['theme' => $readTheme()]);
+}
+
+if ($action === 'save-theme') {
+    require_post();
+    require_auth();
+    $theme = [];
+    foreach ([
+        'accentColor' => 'accentColor',
+        'pageBackground' => 'pageBackground',
+        'surfaceColor' => 'surfaceColor',
+        'primaryText' => 'primaryText'
+    ] as $field => $key) {
+        $value = trim((string)($_POST[$field] ?? ''));
+        if (!preg_match('/^#[0-9a-fA-F]{6}$/', $value)) json_response(['error' => "Invalid {$field} color."], 422);
+        $theme[$key] = strtolower($value);
+    }
+    $theme['buttonRadius'] = (string)($_POST['buttonRadius'] ?? '');
+    $theme['galleryLayout'] = (string)($_POST['galleryLayout'] ?? '');
+    $theme['galleryEdge'] = (string)($_POST['galleryEdge'] ?? '');
+    if (!in_array($theme['buttonRadius'], ['2px', '4px', '8px', '999px'], true)) json_response(['error' => 'Invalid button radius.'], 422);
+    if (!in_array($theme['galleryLayout'], ['uniform', 'masonry', 'editorial', 'clean'], true)) json_response(['error' => 'Invalid gallery layout.'], 422);
+    if (!in_array($theme['galleryEdge'], ['rounded', 'slight', 'square', 'none'], true)) json_response(['error' => 'Invalid gallery edge style.'], 422);
+    $stmt = db()->prepare('INSERT INTO site_settings (id, accent_color, page_background, surface_color, primary_text, button_radius, gallery_layout, gallery_edge) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE accent_color = VALUES(accent_color), page_background = VALUES(page_background), surface_color = VALUES(surface_color), primary_text = VALUES(primary_text), button_radius = VALUES(button_radius), gallery_layout = VALUES(gallery_layout), gallery_edge = VALUES(gallery_edge)');
+    $stmt->execute([$theme['accentColor'], $theme['pageBackground'], $theme['surfaceColor'], $theme['primaryText'], $theme['buttonRadius'], $theme['galleryLayout'], $theme['galleryEdge']]);
+    json_response(['saved' => true, 'theme' => $theme]);
+}
+
+if ($action === 'reset-theme') {
+    require_post();
+    require_auth();
+    $stmt = db()->prepare('INSERT INTO site_settings (id, accent_color, page_background, surface_color, primary_text, button_radius, gallery_layout, gallery_edge) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE accent_color = VALUES(accent_color), page_background = VALUES(page_background), surface_color = VALUES(surface_color), primary_text = VALUES(primary_text), button_radius = VALUES(button_radius), gallery_layout = VALUES(gallery_layout), gallery_edge = VALUES(gallery_edge)');
+    $stmt->execute([$themeDefaults['accentColor'], $themeDefaults['pageBackground'], $themeDefaults['surfaceColor'], $themeDefaults['primaryText'], $themeDefaults['buttonRadius'], $themeDefaults['galleryLayout'], $themeDefaults['galleryEdge']]);
+    json_response(['reset' => true, 'theme' => $themeDefaults]);
+}
+
+if ($action === 'content' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Cache-Control: no-store, max-age=0');
+    $entries = db()->query("SELECT id, slug, title, cover_image AS coverImage, type, excerpt, body, publish_date AS publishDate, status, featured, show_home AS showHome, show_card AS showCard, card_size AS cardSize FROM content_entries WHERE status = 'published' ORDER BY featured DESC, publish_date DESC, id DESC LIMIT 50")->fetchAll();
+    foreach ($entries as &$entry) {
+        $entry['featured'] = (bool)$entry['featured'];
+        $entry['showHome'] = (bool)$entry['showHome'];
+        $entry['showCard'] = (bool)$entry['showCard'];
+    }
+    json_response(['entries' => $entries]);
+}
+
+if ($action === 'admin-content' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    require_auth();
+    $entries = db()->query('SELECT id, slug, title, cover_image AS coverImage, type, excerpt, body, publish_date AS publishDate, status, featured, show_home AS showHome, show_card AS showCard, card_size AS cardSize FROM content_entries ORDER BY updated_at DESC, id DESC')->fetchAll();
+    foreach ($entries as &$entry) {
+        $entry['featured'] = (bool)$entry['featured'];
+        $entry['showHome'] = (bool)$entry['showHome'];
+        $entry['showCard'] = (bool)$entry['showCard'];
+    }
+    json_response(['entries' => $entries]);
+}
+
+if ($action === 'content-entry') {
+    require_post();
+    require_auth();
+    $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+    $title = request_string('title', 180);
+    $body = trim((string)($_POST['body'] ?? ''));
+    if ($body === '' || strlen($body) > 100000) json_response(['error' => 'Content body is required and must be 100,000 characters or fewer.'], 422);
+    $excerpt = trim((string)($_POST['excerpt'] ?? ''));
+    if (strlen($excerpt) > 500) json_response(['error' => 'Excerpt must be 500 characters or fewer.'], 422);
+    $type = (string)($_POST['type'] ?? '');
+    $status = (string)($_POST['status'] ?? '');
+    $cardSize = (string)($_POST['cardSize'] ?? '');
+    if (!in_array($type, ['blog', 'news', 'update', 'announcement'], true)) json_response(['error' => 'Invalid content type.'], 422);
+    if (!in_array($status, ['draft', 'published'], true)) json_response(['error' => 'Invalid publication status.'], 422);
+    if (!in_array($cardSize, ['standard', 'wide', 'featured'], true)) json_response(['error' => 'Invalid card size.'], 422);
+    $featured = $postBoolean('featured');
+    $showHome = $postBoolean('showHome');
+    $showCard = $postBoolean('showCard');
+    $publishDate = (string)($_POST['publishDate'] ?? '');
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $publishDate);
+    $dateErrors = DateTimeImmutable::getLastErrors();
+    if (!$date || ($dateErrors && ($dateErrors['warning_count'] || $dateErrors['error_count'])) || $date->format('Y-m-d') !== $publishDate) {
+        json_response(['error' => 'Enter a valid publish date.'], 422);
+    }
+    $slug = $safeSlug(trim((string)($_POST['slug'] ?? '')) ?: $title);
+    if ($slug === '') json_response(['error' => 'Enter a title that can form a valid slug.'], 422);
+
+    $existing = null;
+    if ($id) {
+        $existingStmt = db()->prepare('SELECT cover_image FROM content_entries WHERE id = ?');
+        $existingStmt->execute([$id]);
+        $existing = $existingStmt->fetch();
+        if (!$existing) json_response(['error' => 'Content entry not found.'], 404);
+    }
+    $duplicate = db()->prepare('SELECT id FROM content_entries WHERE slug = ? AND (? IS NULL OR id <> ?) LIMIT 1');
+    $duplicate->execute([$slug, $id, $id]);
+    if ($duplicate->fetch()) json_response(['error' => 'That content slug is already in use.'], 422);
+
+    $coverImage = trim((string)($_POST['coverImage'] ?? ''));
+    $hasCoverUpload = isset($_FILES['coverImageFile']) && $_FILES['coverImageFile']['error'] !== UPLOAD_ERR_NO_FILE;
+    if (!$hasCoverUpload && $coverImage !== '' && !filter_var($coverImage, FILTER_VALIDATE_URL)) {
+        json_response(['error' => 'External cover image URL must be a valid HTTP or HTTPS URL.'], 422);
+    }
+    if (!$hasCoverUpload && $coverImage !== '' && !in_array((string)parse_url($coverImage, PHP_URL_SCHEME), ['http', 'https'], true)) {
+        json_response(['error' => 'External cover image URL must use HTTP or HTTPS.'], 422);
+    }
+    $uploadedPath = null;
+    if ($hasCoverUpload) {
+        $file = $_FILES['coverImageFile'];
+        if ($file['error'] !== UPLOAD_ERR_OK || $file['size'] > MAX_UPLOAD_BYTES) json_response(['error' => 'Cover image upload failed or exceeds 8MB.'], 422);
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+        if (!isset($allowed[$mime])) json_response(['error' => 'Cover image must be JPG, PNG, GIF, or WebP.'], 422);
+        $folder = PROJECT_UPLOAD_DIR . 'content/';
+        if (!is_dir($folder) && !mkdir($folder, 0755, true)) json_response(['error' => 'Content upload directory is unavailable.'], 500);
+        $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+        $uploadedPath = $folder . $filename;
+        if (!move_uploaded_file($file['tmp_name'], $uploadedPath)) json_response(['error' => 'Could not save cover image.'], 500);
+        $coverImage = PROJECT_UPLOAD_URL . 'content/' . $filename;
+    }
+    if ($coverImage === '' && $existing) $coverImage = $existing['cover_image'] ?? '';
+    try {
+        if ($id) {
+            $stmt = db()->prepare('UPDATE content_entries SET slug = ?, title = ?, cover_image = ?, type = ?, excerpt = ?, body = ?, publish_date = ?, status = ?, featured = ?, show_home = ?, show_card = ?, card_size = ? WHERE id = ?');
+            $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize, $id]);
+            json_response(['updated' => true, 'id' => $id]);
+        }
+        $stmt = db()->prepare('INSERT INTO content_entries (slug, title, cover_image, type, excerpt, body, publish_date, status, featured, show_home, show_card, card_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize]);
+        json_response(['created' => true, 'id' => db()->lastInsertId()], 201);
+    } catch (Throwable $error) {
+        if ($uploadedPath && is_file($uploadedPath)) unlink($uploadedPath);
+        if ($error instanceof PDOException && (string)$error->getCode() === '23000') json_response(['error' => 'That content slug is already in use.'], 422);
+        throw $error;
+    }
+}
+
+if ($action === 'delete-content') {
+    require_post();
+    require_auth();
+    $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+    if (!$id) json_response(['error' => 'Invalid content entry.'], 422);
+    $stmt = db()->prepare('DELETE FROM content_entries WHERE id = ?');
+    $stmt->execute([$id]);
+    json_response(['deleted' => $stmt->rowCount() > 0]);
+}
+
 if ($action === 'projects' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $showHomeOnly = ($_GET['home'] ?? '') === '1';
-    $sql = 'SELECT id, title, slug, category, image_url AS image, image_urls, alt_text AS altText, description, show_home AS showHome, sort_order AS sortOrder FROM projects';
+    $sql = 'SELECT id, title, slug, category, image_url AS image, image_urls, alt_text AS altText, description, show_home AS showHome, sort_order AS sortOrder, display_size AS displaySize FROM projects';
     if ($showHomeOnly) $sql .= ' WHERE show_home = 1';
     $sql .= ' ORDER BY sort_order ASC, created_at DESC, id DESC';
     $projects = db()->query($sql)->fetchAll();
@@ -132,6 +326,14 @@ if ($action === 'project') {
     $category = request_string('category', 80);
     $description = request_string('description', 2000);
     $showHome = ($_POST['showHome'] ?? '') === '1' ? 1 : 0;
+    $displaySize = (string)($_POST['displaySize'] ?? '');
+    if ($displaySize === '' && $projectId) {
+        $existingSize = db()->prepare('SELECT display_size FROM projects WHERE id = ?');
+        $existingSize->execute([$projectId]);
+        $displaySize = (string)($existingSize->fetchColumn() ?: 'standard');
+    }
+    if ($displaySize === '') $displaySize = 'standard';
+    if (!in_array($displaySize, ['standard', 'wide', 'tall', 'featured'], true)) json_response(['error' => 'Invalid project display size.'], 422);
 
     $folders = [
         'Illustration' => 'illustration',
@@ -179,16 +381,16 @@ if ($action === 'project') {
             if (!$current) json_response(['error' => 'Project not found.'], 404);
             $imageUrls = json_decode($current['image_urls'] ?? '', true) ?: [$current['image_url']];
         }
-        $stmt = db()->prepare('UPDATE projects SET title = ?, slug = ?, category = ?, image_url = ?, image_urls = ?, alt_text = ?, description = ?, show_home = ?, sort_order = ? WHERE id = ?');
-        $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder, $projectId]);
+        $stmt = db()->prepare('UPDATE projects SET title = ?, slug = ?, category = ?, image_url = ?, image_urls = ?, alt_text = ?, description = ?, show_home = ?, sort_order = ?, display_size = ? WHERE id = ?');
+        $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder, $displaySize, $projectId]);
         json_response(['updated' => true]);
     }
     $slugCheck = db()->prepare('SELECT id FROM projects WHERE slug = ? LIMIT 1');
     $slugCheck->execute([$slug]);
     if ($slugCheck->fetch()) json_response(['error' => 'That project slug is already in use.'], 422);
-    $stmt = db()->prepare('INSERT INTO projects (title, slug, category, image_url, image_urls, alt_text, description, show_home, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder]);
-    json_response(['project' => ['id' => db()->lastInsertId(), 'title' => $title, 'slug' => $slug, 'category' => $category, 'image' => $imageUrls[0], 'images' => $imageUrls, 'altText' => $altText, 'description' => $description, 'showHome' => (bool)$showHome, 'sortOrder' => $sortOrder]], 201);
+    $stmt = db()->prepare('INSERT INTO projects (title, slug, category, image_url, image_urls, alt_text, description, show_home, sort_order, display_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$title, $slug, $category, $imageUrls[0], json_encode($imageUrls), $altText, $description, $showHome, $sortOrder, $displaySize]);
+    json_response(['project' => ['id' => db()->lastInsertId(), 'title' => $title, 'slug' => $slug, 'category' => $category, 'image' => $imageUrls[0], 'images' => $imageUrls, 'altText' => $altText, 'description' => $description, 'showHome' => (bool)$showHome, 'sortOrder' => $sortOrder, 'displaySize' => $displaySize]], 201);
 }
 
 if ($action === 'delete-project') {

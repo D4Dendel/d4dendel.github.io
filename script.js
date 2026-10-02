@@ -327,7 +327,7 @@ const saveData = (key, value) => {
 };
 
 const useCmsApi = window.location.protocol === 'http:' || window.location.protocol === 'https:';
-const scriptSource = document.querySelector('script[src$="script.js"]')?.src;
+const scriptSource = document.querySelector('script[src*="script.js"]')?.src;
 const cmsApi = scriptSource ? new URL('api/index.php', scriptSource).href : 'api/index.php';
 
 const cmsRequest = async (action, options = {}) => {
@@ -344,7 +344,8 @@ let cmsProjects = [];
 const isHomeVisible = (value) => value === true || value === 1 || value === '1';
 const normalizeProjectVisibility = (project) => ({
   ...project,
-  showHome: project.showHome === undefined ? true : isHomeVisible(project.showHome)
+  showHome: project.showHome === undefined ? true : isHomeVisible(project.showHome),
+  displaySize: ['standard', 'wide', 'tall', 'featured'].includes(project.displaySize) ? project.displaySize : 'standard'
 });
 
 const adminLoginForm = document.getElementById('admin-login-form');
@@ -369,6 +370,8 @@ const restoreCmsSession = async () => {
       if (adminContent) adminContent.hidden = false;
       renderProjectList();
       if (useCmsApi) renderAdminProducts();
+      renderAdminContent();
+      loadAdminTheme();
     }
   } catch (error) {
     if (adminLoginMessage) adminLoginMessage.textContent = 'CMS connection unavailable.';
@@ -388,6 +391,8 @@ if (adminLoginForm) {
         updateAdminVisibility();
         renderProjectList();
         if (useCmsApi) renderAdminProducts();
+        renderAdminContent();
+        loadAdminTheme();
       } catch (error) {
         if (adminLoginMessage) adminLoginMessage.textContent = error.message;
       }
@@ -407,6 +412,8 @@ if (adminLoginForm) {
     updateAdminVisibility();
     renderProjectList();
     if (useCmsApi) renderAdminProducts();
+    renderAdminContent();
+    loadAdminTheme();
   });
 }
 
@@ -499,6 +506,8 @@ const renderProjectList = async () => {
       saveData(STORAGE_KEYS.projects, cmsProjects);
       renderManagedProjectViews();
     }
+    const label = toggle.closest('.project-toggle')?.querySelector('.project-toggle-label');
+    if (label) label.textContent = project.showHome ? 'On home' : 'Hidden';
     renderFilteredProjects();
   };
 
@@ -530,6 +539,7 @@ const resetProjectForm = () => {
   projectForm?.reset();
   if (projectForm) projectForm.elements.id.value = '';
   if (projectForm) projectForm.elements.sortOrder.value = '0';
+  if (projectForm) projectForm.elements.displaySize.value = 'standard';
   document.querySelector('[data-project-form-title]')?.replaceChildren(document.createTextNode('Add project'));
   const preview = document.querySelector('[data-project-preview]');
   if (preview) preview.innerHTML = '<span>Project image preview</span>';
@@ -550,6 +560,7 @@ const openProjectModal = (project = null) => {
       projectForm.elements.category.value = project.category;
       projectForm.elements.description.value = project.description;
       projectForm.elements.altText.value = project.altText || '';
+      projectForm.elements.displaySize.value = project.displaySize || 'standard';
       const storedSortOrder = project.sortOrder ?? project.sort_order;
       projectForm.elements.sortOrder.value = storedSortOrder === undefined || storedSortOrder === null ? '' : String(storedSortOrder);
       projectForm.elements.showHome.checked = project.showHome !== false && project.showHome !== 0 && project.showHome !== '0';
@@ -563,8 +574,9 @@ const openProjectModal = (project = null) => {
 const projectCardMarkup = (project) => {
   const images = project.images || [project.image];
   const controls = images.length > 1 ? `<div class="project-card-controls"><button type="button" data-card-prev aria-label="Previous panel">&larr;</button><span data-card-index>1 / ${images.length}</span><button type="button" data-card-next aria-label="Next panel">&rarr;</button></div>` : '';
+  const displaySize = ['standard', 'wide', 'tall', 'featured'].includes(project.displaySize) ? project.displaySize : 'standard';
   return `
-    <article class="gallery-card admin-project-card reveal visible" data-modal-images="${images.join('|')}" data-card-images="${images.join('|')}" data-card-position="0">
+    <article class="gallery-card admin-project-card reveal visible" data-display-size="${displaySize}" data-modal-images="${images.join('|')}" data-card-images="${images.join('|')}" data-card-position="0">
       <img class="featured-image" src="${images[0]}" alt="${project.altText || project.title}" loading="lazy">
       ${controls}
       <div class="tile-overlay"><span>${project.category}</span><h3>${project.title}</h3><p>${project.description}</p></div>
@@ -594,7 +606,8 @@ const renderManagedProjectViews = async () => {
     try {
       projects = (await cmsRequest('projects')).projects.map((project) => ({
         ...project,
-        showHome: project.showHome === true || project.showHome === 1 || project.showHome === '1'
+        showHome: project.showHome === true || project.showHome === 1 || project.showHome === '1',
+        displaySize: ['standard', 'wide', 'tall', 'featured'].includes(project.displaySize) ? project.displaySize : 'standard'
       }));
     } catch (error) {
       return;
@@ -1157,6 +1170,17 @@ const allowedThemeValues = {
   galleryLayout: new Set(['uniform', 'masonry', 'editorial', 'clean']),
   galleryEdge: new Set(['rounded', 'slight', 'square', 'none'])
 };
+const defaultThemeSettings = {
+  accentColor: '#c86f52',
+  pageBackground: '#fff0e8',
+  surfaceColor: '#fff8f3',
+  primaryText: '#3d2925',
+  buttonRadius: '999px',
+  galleryLayout: 'uniform',
+  galleryEdge: 'rounded'
+};
+let themePreviewReady = false;
+let cmsContentEntries = [];
 
 const renderGalleryThemePreview = () => {
   if (!galleryThemePreview) return;
@@ -1189,52 +1213,355 @@ const renderGalleryThemePreview = () => {
 };
 
 const applyThemePreview = () => {
-  if (!themeForm) return;
+  if (!themeForm || !galleryThemePreview) return false;
   const formData = new FormData(themeForm);
-  const colors = ['accent', 'background', 'surface', 'text'];
-  colors.forEach((field) => {
-    const value = String(formData.get(field) || '');
-    if (/^#[\da-f]{6}$/i.test(value)) document.body.style.setProperty(`--cms-${field === 'accent' ? 'accent' : field === 'background' ? 'bg' : field}`, value);
-  });
-  ['radius', 'galleryLayout', 'galleryEdge'].forEach((field) => {
-    const value = String(formData.get(field) || '');
-    if (!allowedThemeValues[field].has(value)) return;
-    if (field === 'radius') document.body.style.setProperty('--cms-radius', value);
-    else galleryThemePreview.dataset[field === 'galleryLayout' ? 'galleryLayout' : 'galleryEdge'] = value;
-  });
+  const values = {
+    accentColor: String(formData.get('accent') || ''),
+    pageBackground: String(formData.get('background') || ''),
+    surfaceColor: String(formData.get('surface') || ''),
+    primaryText: String(formData.get('text') || ''),
+    buttonRadius: String(formData.get('radius') || ''),
+    galleryLayout: String(formData.get('galleryLayout') || ''),
+    galleryEdge: String(formData.get('galleryEdge') || '')
+  };
+  if (![values.accentColor, values.pageBackground, values.surfaceColor, values.primaryText].every((value) => /^#[\da-f]{6}$/i.test(value))) return false;
+  if (!allowedThemeValues.radius.has(values.buttonRadius) || !allowedThemeValues.galleryLayout.has(values.galleryLayout) || !allowedThemeValues.galleryEdge.has(values.galleryEdge)) return false;
+  document.body.style.setProperty('--cms-accent', values.accentColor);
+  document.body.style.setProperty('--cms-bg', values.pageBackground);
+  document.body.style.setProperty('--cms-surface', values.surfaceColor);
+  document.body.style.setProperty('--cms-text', values.primaryText);
+  document.body.style.setProperty('--cms-radius', values.buttonRadius);
+  galleryThemePreview.dataset.galleryLayout = values.galleryLayout;
+  galleryThemePreview.dataset.galleryEdge = values.galleryEdge;
+  renderGalleryThemePreview();
+  return true;
+};
+
+const setThemeControls = (theme) => {
+  if (!themeForm) return;
+  themeForm.elements.accent.value = theme.accentColor;
+  themeForm.elements.background.value = theme.pageBackground;
+  themeForm.elements.surface.value = theme.surfaceColor;
+  themeForm.elements.text.value = theme.primaryText;
+  themeForm.elements.radius.value = theme.buttonRadius;
+  themeForm.elements.galleryLayout.value = theme.galleryLayout;
+  themeForm.elements.galleryEdge.value = theme.galleryEdge;
+  if (galleryThemePreview) {
+    galleryThemePreview.dataset.galleryLayout = theme.galleryLayout;
+    galleryThemePreview.dataset.galleryEdge = theme.galleryEdge;
+  }
   renderGalleryThemePreview();
 };
 
+const invalidateThemePreview = () => {
+  themePreviewReady = false;
+  const publishButton = document.querySelector('[data-theme-publish]');
+  const message = document.querySelector('[data-theme-message]');
+  if (publishButton) publishButton.disabled = true;
+  if (message) message.textContent = 'Settings changed. Select Preview Changes before publishing.';
+};
+
+themeForm?.addEventListener('input', invalidateThemePreview);
+themeForm?.addEventListener('change', invalidateThemePreview);
 themeForm?.addEventListener('submit', (event) => {
   event.preventDefault();
-  applyThemePreview();
-});
-themeForm?.addEventListener('reset', () => window.setTimeout(() => {
-  ['--cms-accent', '--cms-bg', '--cms-surface', '--cms-text', '--cms-radius'].forEach((token) => document.body.style.removeProperty(token));
-  if (galleryThemePreview) {
-    galleryThemePreview.dataset.galleryLayout = 'uniform';
-    galleryThemePreview.dataset.galleryEdge = 'rounded';
+  const message = document.querySelector('[data-theme-message]');
+  if (!applyThemePreview()) {
+    if (message) message.textContent = 'One or more theme values are invalid.';
+    return;
   }
-  renderGalleryThemePreview();
-}, 0));
+  themePreviewReady = true;
+  document.querySelector('[data-theme-publish]').disabled = false;
+  if (message) message.textContent = 'Preview is active in this admin session. Save & Publish to update the public site.';
+});
+
+const loadAdminTheme = async () => {
+  if (!themeForm || !useCmsApi) return;
+  const message = document.querySelector('[data-theme-message]');
+  try {
+    const result = await cmsRequest('theme');
+    setThemeControls(result.theme);
+    if (message) message.textContent = 'Published settings loaded. Preview Changes applies edits to this admin session.';
+  } catch (error) {
+    setThemeControls(defaultThemeSettings);
+    if (message) message.textContent = 'Published settings unavailable. Default settings are shown.';
+  }
+};
+
+document.querySelector('[data-theme-publish]')?.addEventListener('click', async () => {
+  if (!themePreviewReady || !themeForm) return;
+  const data = new FormData(themeForm);
+  const payload = new URLSearchParams({
+    accentColor: data.get('accent'),
+    pageBackground: data.get('background'),
+    surfaceColor: data.get('surface'),
+    primaryText: data.get('text'),
+    buttonRadius: data.get('radius'),
+    galleryLayout: data.get('galleryLayout'),
+    galleryEdge: data.get('galleryEdge')
+  });
+  const message = document.querySelector('[data-theme-message]');
+  try {
+    await cmsRequest('save-theme', { method: 'POST', body: payload });
+    if (message) message.textContent = 'Theme published successfully.';
+    themePreviewReady = false;
+    document.querySelector('[data-theme-publish]').disabled = true;
+  } catch (error) {
+    if (message) message.textContent = `Theme was not published: ${error.message}`;
+  }
+});
+
+document.querySelector('[data-theme-reset]')?.addEventListener('click', async () => {
+  const message = document.querySelector('[data-theme-message]');
+  try {
+    const result = await cmsRequest('reset-theme', { method: 'POST' });
+    setThemeControls(result.theme);
+    applyThemePreview();
+    themePreviewReady = false;
+    document.querySelector('[data-theme-publish]').disabled = true;
+    if (message) message.textContent = 'Theme defaults restored and published.';
+  } catch (error) {
+    if (message) message.textContent = `Defaults were not restored: ${error.message}`;
+  }
+});
+
+const renderAdminContent = async () => {
+  const list = document.getElementById('content-list');
+  if (!list || !useCmsApi) return;
+  try {
+    cmsContentEntries = (await cmsRequest('admin-content')).entries;
+    list.replaceChildren();
+    if (!cmsContentEntries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'cms-empty-state';
+      const heading = document.createElement('h2');
+      heading.textContent = 'No content entries';
+      const note = document.createElement('p');
+      note.textContent = 'Create a draft or publish a new blog, news, update, or announcement.';
+      empty.append(heading, note);
+      list.append(empty);
+      return;
+    }
+    cmsContentEntries.forEach((entry) => {
+      const row = document.createElement('article');
+      row.className = 'cms-content-row';
+      if (entry.coverImage) {
+        const image = document.createElement('img');
+        image.src = entry.coverImage;
+        image.alt = '';
+        row.append(image);
+      }
+      const main = document.createElement('div');
+      main.className = 'cms-content-row-main';
+      const title = document.createElement('h2');
+      title.textContent = entry.title;
+      const excerpt = document.createElement('p');
+      excerpt.textContent = entry.excerpt;
+      const meta = document.createElement('span');
+      meta.textContent = `${entry.type} · ${entry.publishDate} · ${entry.cardSize}`;
+      const status = document.createElement('span');
+      status.className = `cms-content-status is-${entry.status}`;
+      status.textContent = entry.status === 'published' ? 'Published' : 'Draft';
+      main.append(title, excerpt, meta);
+      const actions = document.createElement('div');
+      actions.className = 'admin-item-actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'cms-button';
+      edit.dataset.editContent = String(entry.id);
+      edit.textContent = 'Edit';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'cms-button cms-content-delete';
+      remove.dataset.deleteContent = String(entry.id);
+      remove.textContent = 'Delete';
+      actions.append(status, edit, remove);
+      row.append(main, actions);
+      list.append(row);
+    });
+  } catch (error) {
+    list.textContent = `Content list unavailable: ${error.message}`;
+  }
+};
+
+const contentForm = document.getElementById('content-form');
+const contentCoverPreview = document.querySelector('[data-content-cover-preview]');
+
+const renderContentCoverPreview = (coverImage) => {
+  if (!contentCoverPreview) return;
+  contentCoverPreview.replaceChildren();
+  contentCoverPreview.hidden = !coverImage;
+  if (!coverImage) return;
+  const image = document.createElement('img');
+  image.src = coverImage;
+  image.alt = 'Current saved cover image';
+  const note = document.createElement('span');
+  note.textContent = 'A cover image is already saved. Leave Upload and External image URL empty to keep it.';
+  contentCoverPreview.append(image, note);
+};
+
+const resetContentForm = () => {
+  contentForm?.reset();
+  if (contentForm) {
+    contentForm.elements.id.value = '';
+    contentForm.elements.publishDate.value = new Date().toISOString().slice(0, 10);
+  }
+  document.querySelector('[data-content-form-title]').textContent = 'Create content entry';
+  document.querySelector('[data-content-save]').textContent = 'Save Draft';
+  document.querySelector('[data-content-form-message]').textContent = '';
+  renderContentCoverPreview('');
+};
 
 document.querySelector('[data-open-content-editor]')?.addEventListener('click', () => {
-  const editor = document.querySelector('[data-content-editor]');
-  if (editor) editor.hidden = false;
+  resetContentForm();
+  document.querySelector('[data-content-editor]').hidden = false;
 });
 document.querySelectorAll('[data-close-content-editor]').forEach((button) => button.addEventListener('click', () => {
-  const editor = document.querySelector('[data-content-editor]');
-  const form = document.getElementById('content-form');
-  const message = document.querySelector('[data-content-form-message]');
-  if (editor) editor.hidden = true;
-  form?.reset();
-  if (message) message.textContent = '';
+  document.querySelector('[data-content-editor]').hidden = true;
+  resetContentForm();
 }));
-document.getElementById('content-form')?.addEventListener('submit', (event) => {
-  event.preventDefault();
+listContentActions();
+
+function listContentActions() {
+  const list = document.getElementById('content-list');
+  if (!list) return;
+  list.addEventListener('click', async (event) => {
+    const editButton = event.target.closest('[data-edit-content]');
+    if (editButton) {
+      const entry = cmsContentEntries.find((item) => Number(item.id) === Number(editButton.dataset.editContent));
+      if (!entry || !contentForm) return;
+      contentForm.elements.id.value = entry.id;
+      contentForm.elements.title.value = entry.title;
+      contentForm.elements.slug.value = entry.slug;
+      const hasExternalCover = /^https?:\/\//i.test(entry.coverImage || '');
+      contentForm.elements.coverImage.value = hasExternalCover ? entry.coverImage : '';
+      renderContentCoverPreview(entry.coverImage || '');
+      contentForm.elements.type.value = entry.type;
+      contentForm.elements.publishDate.value = entry.publishDate;
+      contentForm.elements.excerpt.value = entry.excerpt;
+      contentForm.elements.body.value = entry.body;
+      contentForm.elements.status.value = entry.status;
+      contentForm.elements.cardSize.value = entry.cardSize;
+      contentForm.elements.featured.checked = entry.featured;
+      contentForm.elements.showHome.checked = entry.showHome;
+      contentForm.elements.showCard.checked = entry.showCard;
+      document.querySelector('[data-content-form-title]').textContent = 'Edit content entry';
+      document.querySelector('[data-content-save]').textContent = entry.status === 'published' ? 'Save changes' : 'Save Draft';
+      document.querySelector('[data-content-editor]').hidden = false;
+      return;
+    }
+    const deleteButton = event.target.closest('[data-delete-content]');
+    if (!deleteButton || !window.confirm('Delete this content entry?')) return;
+    try {
+      await cmsRequest('delete-content', { method: 'POST', body: new URLSearchParams({ id: deleteButton.dataset.deleteContent }) });
+      await renderAdminContent();
+      await renderPublicContent();
+    } catch (error) {
+      window.alert(error.message);
+    }
+  });
+}
+
+const saveContentEntry = async (status) => {
+  if (!contentForm) return;
   const message = document.querySelector('[data-content-form-message]');
-  if (message) message.textContent = 'Nothing was saved. Content storage and API support require approval and implementation.';
+  const payload = new FormData(contentForm);
+  const uploadedCover = payload.get('coverImageFile');
+  if (uploadedCover instanceof File && uploadedCover.size > 0) payload.set('coverImage', '');
+  payload.set('status', status);
+  payload.set('featured', contentForm.elements.featured.checked ? '1' : '0');
+  payload.set('showHome', contentForm.elements.showHome.checked ? '1' : '0');
+  payload.set('showCard', contentForm.elements.showCard.checked ? '1' : '0');
+  try {
+    await cmsRequest('content-entry', { method: 'POST', body: payload });
+    await renderAdminContent();
+    resetContentForm();
+    if (message) message.textContent = status === 'published' ? 'Content published.' : 'Draft saved.';
+    await renderPublicContent();
+  } catch (error) {
+    if (message) message.textContent = error.message;
+  }
+};
+
+contentForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveContentEntry(contentForm.elements.status.value);
 });
+document.querySelector('[data-content-publish]')?.addEventListener('click', () => saveContentEntry('published'));
+
+const renderPublicContent = async () => {
+  const section = document.querySelector('[data-home-content]');
+  const target = document.querySelector('[data-public-content-list]');
+  if (!section || !target || !useCmsApi) return;
+  try {
+    const entries = (await cmsRequest('content')).entries.filter((entry) => entry.showHome && entry.showCard);
+    target.replaceChildren();
+    entries.forEach((entry) => {
+      const card = document.createElement('article');
+      card.className = 'home-content-card';
+      card.dataset.cardSize = ['standard', 'wide', 'featured'].includes(entry.cardSize) ? entry.cardSize : 'standard';
+      if (entry.featured) card.classList.add('is-featured');
+      if (entry.coverImage) {
+        const image = document.createElement('img');
+        image.src = entry.coverImage;
+        image.alt = '';
+        image.loading = 'lazy';
+        card.append(image);
+      }
+      const type = document.createElement('span');
+      type.textContent = entry.type;
+      const title = document.createElement('h3');
+      title.textContent = entry.title;
+      const excerpt = document.createElement('p');
+      excerpt.textContent = entry.excerpt;
+      const date = document.createElement('time');
+      date.dateTime = entry.publishDate;
+      date.textContent = entry.publishDate;
+      card.append(type, title, excerpt, date);
+      target.append(card);
+    });
+    section.hidden = entries.length === 0;
+  } catch (error) {
+    section.hidden = true;
+  }
+};
+
+const applyPublicTheme = (theme) => {
+  const colors = {
+    accentColor: '--blue-deep',
+    pageBackground: '--bg',
+    surfaceColor: '--panel-strong',
+    primaryText: '--text'
+  };
+  Object.entries(colors).forEach(([key, token]) => {
+    const value = theme[key];
+    if (/^#[\da-f]{6}$/i.test(value || '')) {
+      document.documentElement.style.setProperty(token, value.toLowerCase());
+      if (key === 'pageBackground') document.documentElement.style.setProperty('--page-background-start', value.toLowerCase());
+      if (key === 'accentColor') {
+        document.documentElement.style.setProperty('--blue', value.toLowerCase());
+        document.documentElement.style.setProperty('--blue-soft', value.toLowerCase());
+      }
+      if (key === 'surfaceColor') document.documentElement.style.setProperty('--panel', value.toLowerCase());
+    }
+  });
+  if (allowedThemeValues.radius.has(theme.buttonRadius)) document.documentElement.style.setProperty('--button-radius', theme.buttonRadius);
+  if (!allowedThemeValues.galleryLayout.has(theme.galleryLayout) || !allowedThemeValues.galleryEdge.has(theme.galleryEdge)) return;
+  document.querySelectorAll('.home-gallery, [data-category-projects], .home-content-grid').forEach((gallery) => {
+    gallery.dataset.galleryLayout = theme.galleryLayout;
+    gallery.dataset.galleryEdge = theme.galleryEdge;
+  });
+};
+
+const loadPublicTheme = async () => {
+  if (!useCmsApi) return;
+  try {
+    const result = await cmsRequest('theme');
+    applyPublicTheme(result.theme);
+  } catch (error) {
+    return;
+  }
+};
 
 const socialForm = document.getElementById('social-form');
 if (socialForm) {
@@ -1406,6 +1733,8 @@ if (shopProductsTarget) {
 renderProjectList();
 renderHomepageGallery();
 renderManagedProjectViews();
+loadPublicTheme();
+renderPublicContent();
 updateSocialLinks();
 updateAdminVisibility();
 restoreCmsSession();
