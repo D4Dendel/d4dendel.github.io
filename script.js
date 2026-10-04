@@ -1,3 +1,17 @@
+const syncPublicButtonContrast = () => {
+  if (document.body.dataset.page === 'admin') return;
+  const styles = getComputedStyle(document.documentElement);
+  [['--text', '--on-text', 1], ['--blue-deep', '--on-accent', 1], ['--blue-deep', '--on-accent-hover', 0.82]].forEach(([background, foreground, shade]) => {
+    const hex = styles.getPropertyValue(background).trim();
+    if (!/^#[\da-f]{6}$/i.test(hex)) return;
+    const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255 * shade)
+      .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+    const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    document.body.style.setProperty(foreground, (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? '#000000' : '#ffffff');
+  });
+};
+syncPublicButtonContrast();
+
 const menuToggle = document.querySelector('.menu-toggle');
 const nav = document.querySelector('.nav');
 
@@ -12,26 +26,15 @@ if (document.body.dataset.page !== 'admin') {
   document.body.prepend(pointerCanvas);
 
   const canvasContext = pointerCanvas.getContext('2d');
-  const brushColors = [
-    { name: 'Coral', value: '243, 168, 137' },
-    { name: 'Terracotta', value: '200, 111, 82' },
-    { name: 'Blue', value: '93, 145, 183' },
-    { name: 'Golden yellow', value: '221, 169, 72' },
-    { name: 'Plum', value: '126, 84, 116' }
-  ];
-  let selectedBrushColor = brushColors[0].value;
   let canvasScale = 1;
   let lastPointerPosition = null;
-
-  const brushPalette = document.createElement('div');
-  brushPalette.className = 'brush-palette';
-  brushPalette.setAttribute('aria-label', 'Brush color');
-  brushPalette.innerHTML = brushColors.map((color, index) => `
-    <button class="brush-swatch${index === 0 ? ' is-selected' : ''}" type="button"
-      style="--swatch-color: rgb(${color.value})" data-brush-color="${color.value}"
-      aria-label="${color.name}" aria-pressed="${index === 0}"></button>
-  `).join('');
-  document.body.append(brushPalette);
+  let trailColor = '200, 111, 82';
+  const syncTrailColor = () => {
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim();
+    if (/^#[\da-f]{6}$/i.test(accent)) trailColor = [1, 3, 5].map((offset) => parseInt(accent.slice(offset, offset + 2), 16)).join(', ');
+  };
+  syncTrailColor();
+  document.addEventListener('public-theme-applied', syncTrailColor);
 
   let contactMascot = document.querySelector('.contact-mascot');
   if (!contactMascot) {
@@ -44,81 +47,6 @@ if (document.body.dataset.page !== 'admin') {
   } else {
     document.body.append(contactMascot);
   }
-  const syncMascotToPalette = () => {
-    if (!contactMascot) return;
-    const paletteRect = brushPalette.getBoundingClientRect();
-    if (!paletteRect.width || window.matchMedia('(max-width: 760px)').matches) return;
-    contactMascot.style.bottom = `${window.innerHeight - paletteRect.top}px`;
-    contactMascot.style.right = `${window.innerWidth - paletteRect.right}px`;
-  };
-
-  syncMascotToPalette();
-  window.addEventListener('resize', syncMascotToPalette);
-
-  let paletteDrag = null;
-  let suppressPaletteClick = false;
-
-  brushPalette.addEventListener('pointerdown', (event) => {
-    if (event.target.closest('.brush-swatch')) return;
-
-    const paletteRect = brushPalette.getBoundingClientRect();
-    paletteDrag = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      left: paletteRect.left,
-      top: paletteRect.top,
-      moved: false
-    };
-    brushPalette.setPointerCapture(event.pointerId);
-    brushPalette.classList.add('is-dragging');
-  });
-
-  brushPalette.addEventListener('pointermove', (event) => {
-    if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
-
-    const moveX = event.clientX - paletteDrag.startX;
-    const moveY = event.clientY - paletteDrag.startY;
-    paletteDrag.moved = paletteDrag.moved || Math.hypot(moveX, moveY) > 4;
-    const maxLeft = window.innerWidth - brushPalette.offsetWidth - 10;
-    const maxTop = window.innerHeight - brushPalette.offsetHeight - 10;
-    const nextLeft = Math.max(10, Math.min(maxLeft, paletteDrag.left + moveX));
-    const nextTop = Math.max(10, Math.min(maxTop, paletteDrag.top + moveY));
-
-    brushPalette.style.left = `${nextLeft}px`;
-    brushPalette.style.top = `${nextTop}px`;
-    brushPalette.style.right = 'auto';
-    brushPalette.style.bottom = 'auto';
-    syncMascotToPalette();
-  });
-
-  const stopPaletteDrag = (event) => {
-    if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
-    suppressPaletteClick = paletteDrag.moved;
-    paletteDrag = null;
-    brushPalette.classList.remove('is-dragging');
-  };
-
-  brushPalette.addEventListener('pointerup', stopPaletteDrag);
-  brushPalette.addEventListener('pointercancel', stopPaletteDrag);
-
-  brushPalette.addEventListener('click', (event) => {
-    if (suppressPaletteClick) {
-      suppressPaletteClick = false;
-      return;
-    }
-
-    const swatch = event.target.closest('[data-brush-color]');
-    if (!swatch) return;
-
-    selectedBrushColor = swatch.dataset.brushColor;
-    brushPalette.querySelectorAll('.brush-swatch').forEach((button) => {
-      const isSelected = button === swatch;
-      button.classList.toggle('is-selected', isSelected);
-      button.setAttribute('aria-pressed', String(isSelected));
-    });
-  });
-
   const resizePointerCanvas = () => {
     canvasScale = Math.min(window.devicePixelRatio || 1, 2);
     pointerCanvas.width = Math.floor(window.innerWidth * canvasScale);
@@ -139,7 +67,7 @@ if (document.body.dataset.page !== 'admin') {
       const markX = x + Math.cos(angle) * distance;
       const markY = y + Math.sin(angle) * distance;
       const gradient = canvasContext.createRadialGradient(markX, markY, 0, markX, markY, radius);
-      const color = selectedBrushColor;
+      const color = trailColor;
 
       gradient.addColorStop(0, `rgba(${color}, ${0.08 + Math.random() * 0.1})`);
       gradient.addColorStop(1, `rgba(${color}, 0)`);
@@ -191,6 +119,30 @@ if (document.body.dataset.page !== 'admin') {
 
     window.requestAnimationFrame(fadeCanvas);
   }
+}
+
+// Resolve public destinations from their existing links, including nested project pages.
+if (nav && document.body.dataset.page !== 'admin') {
+  const primaryLinks = [...nav.querySelectorAll('a[href]')];
+  const normalizeNavPath = (path) => path.replace(/\/index\.html$/, '/');
+  const syncCurrentNavigation = () => {
+    const current = new URL(window.location.href);
+    const currentPath = normalizeNavPath(current.pathname);
+    const destinations = primaryLinks.map((link) => ({ link, url: new URL(link.href) }));
+    const samePage = (url) => url.origin === current.origin && normalizeNavPath(url.pathname) === currentPath;
+    const active = destinations.find(({ url }) => url.hash && url.hash === current.hash && samePage(url))
+      || destinations.find(({ url }) => !url.hash && samePage(url))
+      || destinations.find(({ url }) => {
+        if (url.hash || url.origin !== current.origin) return false;
+        const parentPath = url.pathname.replace(/\.(?:html|php)$/, '/');
+        return current.pathname.startsWith(parentPath)
+          || (url.pathname.endsWith('/stories.php') && current.pathname === url.pathname.replace(/stories\.php$/, 'story.php'));
+      });
+    primaryLinks.forEach((link) => link.removeAttribute('aria-current'));
+    if (active) active.link.setAttribute('aria-current', active.url.hash ? 'location' : 'page');
+  };
+  syncCurrentNavigation();
+  window.addEventListener('hashchange', syncCurrentNavigation);
 }
 
 if (menuToggle && nav) {
@@ -921,6 +873,23 @@ const tabletCard = document.querySelector('.card-main');
 if (tabletDesk && tabletToggle && tabletCanvas) {
   const tabletContext = tabletCanvas.getContext('2d');
   const floatingSketches = [];
+  const removeSketch = (sketch) => {
+    window.clearTimeout(sketch.activeTimer);
+    window.clearTimeout(sketch.removalTimer);
+    sketch.element.remove();
+    const index = floatingSketches.indexOf(sketch);
+    if (index !== -1) floatingSketches.splice(index, 1);
+  };
+  const sketchLimit = () => window.matchMedia('(max-width: 760px)').matches ? 6 : 10;
+  const trimSketches = (limit = sketchLimit()) => {
+    while (floatingSketches.length > limit) removeSketch(floatingSketches[0]);
+  };
+  const fadeSketch = (sketch) => {
+    window.clearTimeout(sketch.activeTimer);
+    window.clearTimeout(sketch.removalTimer);
+    sketch.element.classList.add('is-fading');
+    sketch.removalTimer = window.setTimeout(() => removeSketch(sketch), 6000);
+  };
   let tabletColor = '243, 168, 137';
   let tabletTool = 'brush';
   let tabletDrawing = false;
@@ -1064,6 +1033,8 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
   });
 
   tabletDesk.querySelector('[data-tablet-release]').addEventListener('click', () => {
+    // Remove oldest first, including fading sheets, to keep a strict live DOM cap.
+    trimSketches(sketchLimit() - 1);
     const releasedCanvas = document.createElement('canvas');
     releasedCanvas.width = tabletCanvas.width;
     releasedCanvas.height = tabletCanvas.height;
@@ -1076,7 +1047,7 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
     releasedSketch.style.top = '0';
     releasedSketch.append(releasedCanvas);
     document.body.append(releasedSketch);
-    floatingSketches.push({
+    const sketch = {
       element: releasedSketch,
       x: startX,
       y: startY,
@@ -1084,19 +1055,14 @@ if (tabletDesk && tabletToggle && tabletCanvas) {
       velocityY: -1.5 - Math.random() * 1.5,
       rotation: (Math.random() - 0.5) * 8,
       angularVelocity: (Math.random() - 0.5) * 0.08
-    });
-    window.setTimeout(() => {
-      releasedSketch.classList.add('is-fading');
-      window.setTimeout(() => {
-        releasedSketch.remove();
-        const sketchIndex = floatingSketches.findIndex((sketch) => sketch.element === releasedSketch);
-        if (sketchIndex !== -1) floatingSketches.splice(sketchIndex, 1);
-      }, 6000);
-    }, 30000);
+    };
+    floatingSketches.push(sketch);
+    sketch.activeTimer = window.setTimeout(() => fadeSketch(sketch), 30000);
     tabletContext.clearRect(0, 0, tabletCanvas.width, tabletCanvas.height);
   });
 
   window.addEventListener('resize', () => {
+    trimSketches();
     if (!tabletDesk.hidden) resizeTablet();
   });
 }
@@ -1262,6 +1228,11 @@ const renderGalleryThemePreview = () => {
   }
 };
 
+const syncAdminAccent = (accent) => {
+  if (!themeForm || !/^#[\da-f]{6}$/i.test(accent || '')) return;
+  document.body.style.setProperty('--cms-accent', accent);
+};
+
 const applyThemePreview = () => {
   if (!themeForm || !galleryThemePreview) return false;
   if (!validateThemeColors()) return false;
@@ -1277,10 +1248,13 @@ const applyThemePreview = () => {
   };
   if (![values.accentColor, values.pageBackground, values.surfaceColor, values.primaryText].every((value) => /^#[\da-f]{6}$/i.test(value))) return false;
   if (!allowedThemeValues.radius.has(values.buttonRadius) || !allowedThemeValues.galleryLayout.has(values.galleryLayout) || !allowedThemeValues.galleryEdge.has(values.galleryEdge)) return false;
-  document.body.style.setProperty('--cms-accent', values.accentColor);
-  document.body.style.setProperty('--cms-bg', values.pageBackground);
-  document.body.style.setProperty('--cms-surface', values.surfaceColor);
-  document.body.style.setProperty('--cms-text', values.primaryText);
+  syncAdminAccent(values.accentColor);
+  // Public preview colors belong to the preview, not the neutral Admin shell.
+  galleryThemePreview.style.setProperty('--cms-bg', values.pageBackground);
+  galleryThemePreview.style.setProperty('--cms-surface', values.surfaceColor);
+  galleryThemePreview.style.setProperty('--cms-text', values.primaryText);
+  galleryThemePreview.style.background = 'var(--cms-bg)';
+  galleryThemePreview.style.color = 'var(--cms-text)';
   document.body.style.setProperty('--button-radius', values.buttonRadius);
   galleryThemePreview.dataset.galleryLayout = values.galleryLayout;
   galleryThemePreview.dataset.galleryEdge = values.galleryEdge;
@@ -1291,6 +1265,7 @@ const applyThemePreview = () => {
 
 const setThemeControls = (theme) => {
   if (!themeForm) return;
+  syncAdminAccent(theme.accentColor);
   themeForm.elements.accent.value = theme.accentColor;
   themeForm.elements.background.value = theme.pageBackground;
   themeForm.elements.surface.value = theme.surfaceColor;
@@ -2192,6 +2167,8 @@ const applyPublicTheme = (theme) => {
       if (key === 'surfaceColor') document.documentElement.style.setProperty('--panel', value.toLowerCase());
     }
   });
+  syncPublicButtonContrast();
+  document.dispatchEvent(new Event('public-theme-applied'));
   if (allowedThemeValues.radius.has(theme.buttonRadius)) document.documentElement.style.setProperty('--button-radius', theme.buttonRadius);
   if (!allowedThemeValues.galleryLayout.has(theme.galleryLayout) || !allowedThemeValues.galleryEdge.has(theme.galleryEdge)) return;
   document.querySelectorAll('.home-gallery, [data-category-projects], .home-content-grid').forEach((gallery) => {
@@ -2379,9 +2356,63 @@ if (shopProductsTarget) {
 
 renderProjectList();
 renderHomepageGallery();
-renderManagedProjectViews();
-loadPublicTheme();
-renderPublicContent();
+const publicHomepageReady = Promise.allSettled([
+  renderManagedProjectViews(),
+  loadPublicTheme(),
+  renderPublicContent()
+]);
+
+// Keep the native Contact fragment aligned while asynchronous homepage layout settles.
+const homepageContact = document.body.dataset.page === 'home' ? document.getElementById('contact') : null;
+if (homepageContact) {
+  const main = homepageContact.closest('main');
+  let resolvingContact = window.location.hash === '#contact';
+  const alignContact = () => {
+    if (!resolvingContact || window.location.hash !== '#contact') return;
+    homepageContact.closest('.reveal')?.classList.add('visible');
+    const headerHeight = document.querySelector('.header')?.getBoundingClientRect().height || 0;
+    homepageContact.style.scrollMarginTop = `${headerHeight + 16}px`;
+    homepageContact.scrollIntoView({ behavior: 'instant', block: 'start' });
+  };
+  const beginContactAlignment = () => {
+    resolvingContact = window.location.hash === '#contact';
+    alignContact();
+  };
+  const stopContactAlignment = () => {
+    resolvingContact = false;
+  };
+  window.addEventListener('hashchange', beginContactAlignment);
+  document.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest('a[href]');
+    if (!link || event.defaultPrevented) return;
+    const destination = new URL(link.href);
+    if (destination.origin === window.location.origin && destination.pathname === window.location.pathname && destination.hash === '#contact') {
+      // Also handle clicking Contact again when the fragment has not changed.
+      resolvingContact = true;
+      alignContact();
+    }
+  });
+  window.addEventListener('wheel', stopContactAlignment, { passive: true });
+  window.addEventListener('touchstart', stopContactAlignment, { passive: true });
+  window.addEventListener('pointerdown', stopContactAlignment, { passive: true });
+  window.addEventListener('keydown', (event) => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab'].includes(event.key)) stopContactAlignment();
+  });
+  if (typeof ResizeObserver !== 'undefined') {
+    const layoutObserver = new ResizeObserver(alignContact);
+    layoutObserver.observe(main);
+    const header = document.querySelector('.header');
+    if (header) layoutObserver.observe(header);
+  }
+  main.addEventListener('transitionend', (event) => {
+    if (event.target.contains(homepageContact)) alignContact();
+  });
+  window.addEventListener('load', alignContact, { once: true });
+  publicHomepageReady.then(alignContact);
+  document.fonts?.ready.then(alignContact);
+  alignContact();
+}
 initializeStoriesArchive();
 updateSocialLinks();
 updateAdminVisibility();

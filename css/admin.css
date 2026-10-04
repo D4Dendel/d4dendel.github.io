@@ -10,6 +10,7 @@
 }
 
 body.cms-app {
+    --cms-accent-soft: color-mix(in srgb, var(--cms-accent) 12%, var(--cms-surface));
     min-height: 100vh;
     background: var(--cms-bg);
     color: var(--cms-text);
