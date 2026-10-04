@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261002.5">
-    <link rel="stylesheet" href="css/admin.css?v=20261004.c1">
+    <link rel="stylesheet" href="css/style.css?v=20261004.f1">
+    <link rel="stylesheet" href="css/admin.css?v=20261004.f1">
 </head>
 <body data-page="admin" class="cms-app">
     <header class="header cms-topbar">
@@ -166,18 +166,18 @@
                     <div class="cms-page-heading"><div><span class="cms-kicker">Design system</span><h1>Theme</h1></div></div>
                     <div class="cms-editor cms-theme-editor">
                         <p class="cms-note">Preview Changes affects this admin session. Save &amp; Publish applies validated tokens to the public site.</p>
-                        <form class="cms-form" id="theme-form">
-                            <label><span>Primary / accent color</span><input type="color" name="accent" value="#c86f52"></label>
-                            <label><span>Page background</span><input type="color" name="background" value="#fff0e8"></label>
-                            <label><span>Surface color</span><input type="color" name="surface" value="#fff8f3"></label>
-                            <label><span>Primary text</span><input type="color" name="text" value="#3d2925"></label>
+                        <form class="cms-form" id="theme-form" novalidate>
+                            <div class="cms-theme-color"><span id="theme-accent-label">Primary / accent color</span><div class="cms-theme-color-inputs"><input type="color" name="accent" value="#c86f52" aria-labelledby="theme-accent-label"><input type="text" data-theme-hex="accent" value="#C86F52" aria-label="Primary / accent color HEX value" aria-describedby="theme-accent-error" spellcheck="false" autocomplete="off"></div><small id="theme-accent-error" data-theme-color-error="accent" role="status"></small></div>
+                            <div class="cms-theme-color"><span id="theme-background-label">Page background</span><div class="cms-theme-color-inputs"><input type="color" name="background" value="#fff0e8" aria-labelledby="theme-background-label"><input type="text" data-theme-hex="background" value="#FFF0E8" aria-label="Page background HEX value" aria-describedby="theme-background-error" spellcheck="false" autocomplete="off"></div><small id="theme-background-error" data-theme-color-error="background" role="status"></small></div>
+                            <div class="cms-theme-color"><span id="theme-surface-label">Surface color</span><div class="cms-theme-color-inputs"><input type="color" name="surface" value="#fff8f3" aria-labelledby="theme-surface-label"><input type="text" data-theme-hex="surface" value="#FFF8F3" aria-label="Surface color HEX value" aria-describedby="theme-surface-error" spellcheck="false" autocomplete="off"></div><small id="theme-surface-error" data-theme-color-error="surface" role="status"></small></div>
+                            <div class="cms-theme-color"><span id="theme-text-label">Primary text</span><div class="cms-theme-color-inputs"><input type="color" name="text" value="#3d2925" aria-labelledby="theme-text-label"><input type="text" data-theme-hex="text" value="#3D2925" aria-label="Primary text HEX value" aria-describedby="theme-text-error" spellcheck="false" autocomplete="off"></div><small id="theme-text-error" data-theme-color-error="text" role="status"></small></div>
                             <label><span>Button corner radius</span><select name="radius"><option value="2px">Square</option><option value="4px">Compact</option><option value="8px">Soft</option><option value="999px" selected>Pill</option></select></label>
                             <label><span>Gallery layout</span><select name="galleryLayout"><option value="uniform">Uniform Grid</option><option value="masonry">Masonry</option><option value="editorial">Editorial / Mixed</option><option value="clean">Clean Grid</option></select></label>
                             <label><span>Card/image edges</span><select name="galleryEdge"><option value="rounded">Rounded</option><option value="slight">Slight</option><option value="square">Square</option><option value="none">None / frameless</option></select></label>
                             <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Preview Changes</button><button type="button" class="cms-button" data-theme-publish disabled>Save &amp; Publish</button><button type="button" class="cms-button cms-button-subtle" data-theme-reset>Reset to Default</button></div>
                         </form>
                         <p class="cms-note cms-theme-save-note" data-theme-message role="status">Loading published settings...</p>
-                        <div class="cms-theme-preview-wrap"><div class="cms-section-heading"><h2>Gallery preview</h2><span class="cms-note" data-gallery-preview-note></span></div><div class="cms-gallery-preview" data-gallery-theme-preview data-gallery-layout="uniform" data-gallery-edge="rounded"></div></div>
+                        <div class="cms-theme-preview-wrap"><div class="cms-section-heading"><h2>Gallery preview</h2><span class="cms-note" data-gallery-preview-note></span></div><p class="eyebrow cms-theme-tag-preview">Creative visual storyteller</p><div class="cms-gallery-preview" data-gallery-theme-preview data-gallery-layout="uniform" data-gallery-edge="rounded"></div></div>
                     </div>
                 </section>
 
@@ -198,6 +198,6 @@
         </div>
     </main>
 
-    <script src="script.js?v=20261004.e"></script>
+    <script src="script.js?v=20261004.f1"></script>
 </body>
 </html>

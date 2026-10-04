@@ -333,6 +333,7 @@ const saveData = (key, value) => {
 const useCmsApi = window.location.protocol === 'http:' || window.location.protocol === 'https:';
 const scriptSource = document.querySelector('script[src*="script.js"]')?.src;
 const cmsApi = scriptSource ? new URL('api/index.php', scriptSource).href : 'api/index.php';
+const contentTypeLabels = { blog: 'Blog', news: 'News', update: 'Update', announcement: 'Announcement' };
 
 const cmsRequest = async (action, options = {}) => {
   const response = await fetch(`${cmsApi}?action=${action}`, options);
@@ -1169,6 +1170,51 @@ document.querySelectorAll('[data-project-view]').forEach((control) => control.ad
 
 const themeForm = document.getElementById('theme-form');
 const galleryThemePreview = document.querySelector('[data-gallery-theme-preview]');
+const normalizeThemeHex = (value) => {
+  const input = value.trim();
+  return /^#?[\da-f]{6}$/i.test(input) ? `#${input.replace(/^#/, '').toUpperCase()}` : null;
+};
+
+const syncThemeTagPreview = () => {
+  const preview = document.querySelector('.cms-theme-tag-preview');
+  if (!preview || !themeForm) return;
+  preview.style.setProperty('--blue-deep', themeForm.elements.accent.value);
+  preview.style.setProperty('--panel-strong', themeForm.elements.surface.value);
+  preview.style.setProperty('--text', themeForm.elements.text.value);
+};
+
+const syncThemeHex = (hex, commit = false) => {
+  const color = themeForm.elements[hex.dataset.themeHex];
+  const value = normalizeThemeHex(hex.value);
+  const message = value ? '' : 'Use six HEX digits, e.g. #445FCA. The swatch keeps the last valid color.';
+  hex.setCustomValidity(message);
+  hex.setAttribute('aria-invalid', String(!value));
+  themeForm.querySelector(`[data-theme-color-error="${hex.dataset.themeHex}"]`).textContent = message;
+  if (!value) return false;
+  color.value = value.toLowerCase();
+  if (commit) hex.value = value;
+  return true;
+};
+
+const validateThemeColors = () => {
+  const fields = [...themeForm.querySelectorAll('[data-theme-hex]')];
+  const valid = fields.map((hex) => syncThemeHex(hex, true)).every(Boolean);
+  if (!valid) fields.find((hex) => hex.getAttribute('aria-invalid') === 'true')?.focus();
+  return valid;
+};
+
+const syncThemeColorInput = (event) => {
+  const input = event.target;
+  if (input.matches('[data-theme-hex]')) {
+    syncThemeHex(input, event.type === 'change');
+  } else if (input.matches('input[type="color"]')) {
+    const hex = themeForm.querySelector(`[data-theme-hex="${input.name}"]`);
+    hex.value = input.value.toUpperCase();
+    syncThemeHex(hex, true);
+  }
+};
+themeForm?.addEventListener('input', syncThemeColorInput);
+themeForm?.addEventListener('change', syncThemeColorInput);
 const allowedThemeValues = {
   radius: new Set(['2px', '4px', '8px', '999px']),
   galleryLayout: new Set(['uniform', 'masonry', 'editorial', 'clean']),
@@ -1218,6 +1264,7 @@ const renderGalleryThemePreview = () => {
 
 const applyThemePreview = () => {
   if (!themeForm || !galleryThemePreview) return false;
+  if (!validateThemeColors()) return false;
   const formData = new FormData(themeForm);
   const values = {
     accentColor: String(formData.get('accent') || ''),
@@ -1237,6 +1284,7 @@ const applyThemePreview = () => {
   document.body.style.setProperty('--button-radius', values.buttonRadius);
   galleryThemePreview.dataset.galleryLayout = values.galleryLayout;
   galleryThemePreview.dataset.galleryEdge = values.galleryEdge;
+  syncThemeTagPreview();
   renderGalleryThemePreview();
   return true;
 };
@@ -1247,6 +1295,11 @@ const setThemeControls = (theme) => {
   themeForm.elements.background.value = theme.pageBackground;
   themeForm.elements.surface.value = theme.surfaceColor;
   themeForm.elements.text.value = theme.primaryText;
+  themeForm.querySelectorAll('[data-theme-hex]').forEach((hex) => {
+    hex.value = themeForm.elements[hex.dataset.themeHex].value.toUpperCase();
+    syncThemeHex(hex, true);
+  });
+  syncThemeTagPreview();
   themeForm.elements.radius.value = theme.buttonRadius;
   themeForm.elements.galleryLayout.value = theme.galleryLayout;
   themeForm.elements.galleryEdge.value = theme.galleryEdge;
@@ -1294,6 +1347,10 @@ const loadAdminTheme = async () => {
 
 document.querySelector('[data-theme-publish]')?.addEventListener('click', async () => {
   if (!themePreviewReady || !themeForm) return;
+  if (!validateThemeColors()) {
+    invalidateThemePreview();
+    return;
+  }
   const data = new FormData(themeForm);
   const payload = new URLSearchParams({
     accentColor: data.get('accent'),
@@ -1362,7 +1419,7 @@ const renderAdminContent = async () => {
       const excerpt = document.createElement('p');
       excerpt.textContent = entry.excerpt;
       const meta = document.createElement('span');
-      meta.textContent = `${entry.type} · ${entry.publishDate} · ${entry.cardSize}`;
+      meta.textContent = `${contentTypeLabels[entry.type] || entry.type} · ${entry.publishDate} · ${entry.cardSize}`;
       const status = document.createElement('span');
       status.className = `cms-content-status is-${entry.status}`;
       status.textContent = entry.status === 'published' ? 'Published' : 'Draft';
@@ -1931,30 +1988,54 @@ const renderPublicContent = async () => {
   const target = document.querySelector('[data-public-content-list]');
   if (!section || !target || !useCmsApi) return;
   try {
-    const entries = (await cmsRequest('content')).entries.filter((entry) => entry.showHome && entry.showCard);
+    // Keep API order; this is a short preview, while Stories lists all published summaries.
+    const entries = (await cmsRequest('content')).entries
+      .filter((entry) => entry.status === 'published' && entry.showHome && entry.showCard && Object.hasOwn(contentTypeLabels, entry.type))
+      .slice(0, 6);
     target.replaceChildren();
     entries.forEach((entry) => {
       const card = document.createElement('article');
       card.className = 'home-content-card';
       card.dataset.cardSize = ['standard', 'wide', 'featured'].includes(entry.cardSize) ? entry.cardSize : 'standard';
       if (entry.featured) card.classList.add('is-featured');
-      if (entry.coverImage) {
+      if (entry.coverImage && validContentMediaUrl(entry.coverImage)) {
         const image = document.createElement('img');
         image.src = entry.coverImage;
-        image.alt = '';
+        image.alt = `Cover image for ${entry.title}`;
         image.loading = 'lazy';
+        image.decoding = 'async';
+        image.addEventListener('error', () => image.remove(), { once: true });
         card.append(image);
       }
+      const meta = document.createElement('div');
+      meta.className = 'story-meta';
       const type = document.createElement('span');
-      type.textContent = entry.type;
+      type.textContent = contentTypeLabels[entry.type];
+      meta.append(type);
+      if (entry.featured) {
+        const featured = document.createElement('span');
+        featured.className = 'story-featured';
+        featured.textContent = 'Featured';
+        meta.append(featured);
+      }
       const title = document.createElement('h3');
-      title.textContent = entry.title;
-      const excerpt = document.createElement('p');
-      excerpt.textContent = entry.excerpt;
+      const link = document.createElement('a');
+      link.href = `story.php?slug=${encodeURIComponent(entry.slug)}`;
+      link.textContent = entry.title;
+      title.append(link);
+      card.append(meta, title);
+      if (entry.excerpt) {
+        const excerpt = document.createElement('p');
+        excerpt.textContent = entry.excerpt;
+        card.append(excerpt);
+      }
       const date = document.createElement('time');
       date.dateTime = entry.publishDate;
-      date.textContent = entry.publishDate;
-      card.append(type, title, excerpt, date);
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(entry.publishDate) ? new Date(`${entry.publishDate}T00:00:00Z`) : null;
+      date.textContent = parsed && !Number.isNaN(parsed.valueOf())
+        ? parsed.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+        : entry.publishDate;
+      card.append(date);
       target.append(card);
     });
     section.hidden = entries.length === 0;
@@ -1975,7 +2056,7 @@ const initializeStoriesArchive = () => {
   const count = archive.querySelector('[data-stories-count]');
   const retry = archive.querySelector('[data-stories-retry]');
   const filters = [...archive.querySelectorAll('[data-story-filter]')];
-  const types = { blog: 'Blog', news: 'News', update: 'Update', announcement: 'Announcement' };
+  const types = contentTypeLabels;
   const emptyTypes = { blog: 'blog posts', news: 'news stories', update: 'updates', announcement: 'announcements' };
   let entries = [];
   let activeFilter = 'all';

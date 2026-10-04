@@ -1146,10 +1146,52 @@ body.cms-app {
 }
 
 .cms-theme-editor input[type="color"] {
-    width: 74px;
+    width: 48px;
     height: 38px;
     padding: 3px;
     cursor: pointer;
+}
+
+.cms-theme-color {
+    display: grid;
+    gap: 6px;
+}
+
+.cms-theme-color > span {
+    color: var(--cms-muted);
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.cms-theme-color-inputs {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 10px;
+}
+
+.cms-theme-color-inputs [data-theme-hex] {
+    min-width: 0;
+    font-family: monospace;
+}
+
+.cms-theme-color-inputs [aria-invalid="true"] {
+    border-color: #9c3732;
+}
+
+[data-theme-color-error] {
+    color: #9c3732;
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+[data-theme-color-error]:empty {
+    display: none;
+}
+
+.cms-theme-tag-preview {
+    --blue-deep: var(--cms-accent);
+    --panel-strong: var(--cms-surface);
+    --text: var(--cms-text);
 }
 
 .cms-empty-state {
