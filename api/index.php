@@ -349,6 +349,38 @@ if ($action === 'admin-content' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     json_response(['entries' => $entries]);
 }
 
+if ($action === 'content-media-upload') {
+    require_post();
+    require_auth();
+    $file = $_FILES['imageFile'] ?? null;
+    if (!is_array($file) || !isset($file['error'], $file['size'], $file['tmp_name'])
+        || !is_int($file['error']) || !is_int($file['size']) || !is_string($file['tmp_name'])
+        || $file['error'] !== UPLOAD_ERR_OK || $file['size'] < 1 || $file['size'] > MAX_UPLOAD_BYTES
+        || !is_uploaded_file($file['tmp_name'])) {
+        json_response(['error' => 'Choose a single image file, 8MB or smaller.'], 422);
+    }
+    $size = filesize($file['tmp_name']);
+    if ($size === false || $size < 1 || $size > MAX_UPLOAD_BYTES) {
+        json_response(['error' => 'Image must be 8MB or smaller.'], 422);
+    }
+    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $image = @getimagesize($file['tmp_name']);
+    if (!isset($allowed[$mime]) || $image === false || ($image['mime'] ?? '') !== $mime || $image[0] < 1 || $image[1] < 1) {
+        json_response(['error' => 'Choose a valid JPG, PNG, GIF, or WebP image.'], 422);
+    }
+    // The destination and extension are server-controlled, never supplied by the client.
+    $folder = PROJECT_UPLOAD_DIR . 'content/blocks/';
+    if (!is_dir($folder) && !mkdir($folder, 0755, true)) {
+        json_response(['error' => 'Content image upload directory is unavailable.'], 500);
+    }
+    $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+    if (!move_uploaded_file($file['tmp_name'], $folder . $filename)) {
+        json_response(['error' => 'Could not save image.'], 500);
+    }
+    json_response(['url' => PROJECT_UPLOAD_URL . 'content/blocks/' . $filename], 201);
+}
+
 if ($action === 'content-entry') {
     require_post();
     require_auth();

@@ -768,6 +768,237 @@ body.cms-app {
     color: #9c3732;
 }
 
+.cms-article-composer {
+    padding: 20px 0;
+    border-top: 1px solid var(--cms-border);
+    border-bottom: 1px solid var(--cms-border);
+    min-width: 0;
+}
+
+.cms-composer-heading,
+.cms-block-heading,
+.cms-block-toolbar,
+.cms-block-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.cms-composer-heading h3,
+.cms-block-heading h4 {
+    margin: 0;
+    color: var(--cms-text);
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+.cms-composer-heading p,
+.cms-composer-heading > span,
+.cms-block-empty,
+.cms-composer-notice,
+.cms-block-fields small {
+    color: var(--cms-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.cms-composer-heading p {
+    margin: 5px 0 0;
+}
+
+.cms-block-empty {
+    padding: 16px 0;
+}
+
+.cms-article-block {
+    margin: 18px 0;
+    padding: 0 0 18px;
+    border-bottom: 1px solid var(--cms-border);
+    min-width: 0;
+}
+
+.cms-block-heading {
+    margin-bottom: 12px;
+}
+
+.cms-block-heading h4 {
+    font-size: 0.88rem;
+}
+
+.cms-block-actions {
+    justify-content: flex-start;
+    gap: 4px;
+}
+
+.cms-block-actions .cms-button,
+.cms-gallery-image-fields .cms-button {
+    padding: 6px 9px;
+    font-size: 0.74rem;
+}
+
+.cms-content-editor button:disabled {
+    opacity: 0.5;
+    cursor: default;
+    background: #eef1ef;
+    color: var(--cms-muted);
+}
+
+.cms-block-fields,
+.cms-seo-fields {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+.cms-block-fields hr {
+    width: 100%;
+    border: 0;
+    border-top: 1px solid var(--cms-border);
+}
+
+.cms-gallery-image-fields {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    margin: 0;
+    padding: 12px 0 12px 14px;
+    border: 0;
+    border-left: 2px solid var(--cms-border);
+}
+
+.cms-gallery-image-fields legend {
+    padding: 0 4px;
+    color: var(--cms-muted);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.cms-block-fields > button,
+.cms-gallery-image-fields > button {
+    justify-self: start;
+}
+
+.cms-block-toolbar {
+    justify-content: flex-start;
+    align-items: flex-end;
+}
+
+.cms-block-insertion {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--cms-accent-soft);
+    border: 1px solid var(--cms-border);
+}
+
+.cms-block-insertion h4 {
+    margin: 0 0 12px;
+    color: var(--cms-accent);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+}
+
+.cms-block-media {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.cms-media-alternative {
+    color: var(--cms-muted);
+    font-size: 0.7rem;
+    font-weight: 800;
+}
+
+.cms-media-message,
+.cms-content-publication small,
+.cms-legacy-fields > p {
+    margin: 0;
+    color: var(--cms-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.cms-media-message:empty {
+    display: none;
+}
+
+.cms-media-message.is-error {
+    color: #8b3d36;
+}
+
+.cms-content-publication,
+.cms-legacy-fields {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+}
+
+.cms-content-publication > span {
+    color: var(--cms-muted);
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.cms-content-publication strong {
+    color: var(--cms-text);
+    font-size: 0.86rem;
+}
+
+.cms-legacy-fields {
+    padding-top: 16px;
+}
+
+.cms-block-toolbar label {
+    flex: 1 1 180px;
+    max-width: 320px;
+}
+
+.cms-composer-notice {
+    margin: 10px 0 0;
+}
+
+.cms-composer-notice:empty {
+    display: none;
+}
+
+.cms-content-seo,
+.cms-content-legacy {
+    border-top: 1px solid var(--cms-border);
+    border-bottom: 1px solid var(--cms-border);
+    padding: 12px 0;
+}
+
+.cms-content-seo summary,
+.cms-content-legacy summary {
+    cursor: pointer;
+    color: var(--cms-muted);
+    font-size: 0.85rem;
+    font-weight: 800;
+}
+
+.cms-seo-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 16px;
+}
+
+@media (max-width: 640px) {
+    .cms-seo-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .cms-block-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .cms-block-toolbar label {
+        max-width: none;
+    }
+}
+
 .cms-gallery-preview {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=20261002.5">
-    <link rel="stylesheet" href="css/admin.css?v=20261002.5">
+    <link rel="stylesheet" href="css/admin.css?v=20261004.c1">
 </head>
 <body data-page="admin" class="cms-app">
     <header class="header cms-topbar">
@@ -99,7 +99,7 @@
                     <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div><button type="button" class="cms-button cms-button-primary" data-open-content-editor>New entry</button></div>
                     <section class="cms-editor cms-content-editor" data-content-editor hidden>
                         <div class="cms-section-heading"><div><span class="cms-kicker">Content entry</span><h2 data-content-form-title>Create content entry</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Close</button></div>
-                        <form class="cms-form cms-content-form" id="content-form">
+                        <form class="cms-form cms-content-form" id="content-form" novalidate>
                             <input type="hidden" name="id">
                             <label><span>Title</span><input name="title" maxlength="180" required></label>
                             <label><span>Slug</span><input name="slug" maxlength="180" placeholder="generated from title"></label>
@@ -109,10 +109,32 @@
                             <label><span>Type</span><select name="type"><option value="blog">Blog</option><option value="news">News</option><option value="update">Update</option><option value="announcement">Announcement</option></select></label>
                             <label><span>Publish date</span><input type="date" name="publishDate"></label>
                             <label class="cms-content-wide"><span>Excerpt</span><textarea name="excerpt" rows="2" maxlength="320"></textarea></label>
-                            <label class="cms-content-wide"><span>Full content</span><textarea name="body" rows="7"></textarea></label>
-                            <label><span>Status</span><select name="status"><option value="draft">Draft</option><option value="published">Published</option></select></label>
+                            <section class="cms-article-composer cms-content-wide" aria-labelledby="content-blocks-heading">
+                                <div class="cms-composer-heading"><div><h3 id="content-blocks-heading">Structured article</h3><p>Compose your article with text, images, and YouTube videos.</p></div><span data-content-block-count>0 / 100 blocks</span></div>
+                                <div data-content-block-list></div>
+                                <div class="cms-block-insertion" role="group" aria-labelledby="content-add-block-heading"><h4 id="content-add-block-heading">+ Add Block</h4><div class="cms-block-toolbar"><label><span>Block type</span><select data-content-block-type><option value="paragraph">Paragraph</option><option value="heading">Heading</option><option value="image">Image</option><option value="image_caption">Image + Caption</option><option value="video">YouTube Video</option><option value="quote">Quote</option><option value="divider">Divider</option><option value="gallery">Gallery</option></select></label><button type="button" class="cms-button" data-add-content-block>Add Block</button></div></div>
+                                <p class="cms-composer-notice" data-content-block-notice role="status" aria-live="polite"></p>
+                            </section>
+                            <details class="cms-content-legacy cms-content-wide">
+                                <summary>Legacy Compatibility</summary>
+                                <div class="cms-legacy-fields"><p>Supports compatibility with the previous Content system.</p><label><span>Legacy / Fallback Body (required)</span><textarea name="body" rows="7" required></textarea><small>Edit this separately; structured blocks do not update it.</small></label></div>
+                            </details>
+                            <input type="hidden" name="status" value="draft">
+                            <div class="cms-content-publication"><span>Current status</span><strong data-content-current-status>New draft</strong><small>Save Draft saves as Draft. Publish makes the entry public.</small></div>
                             <label><span>Card size</span><select name="cardSize"><option value="standard">Standard</option><option value="wide">Wide</option><option value="featured">Featured</option></select></label>
                             <div class="cms-content-options"><label><input type="checkbox" name="featured"><span>Featured</span></label><label><input type="checkbox" name="showHome"><span>Show on homepage</span></label><label><input type="checkbox" name="showCard" checked><span>Show as card</span></label></div>
+                            <details class="cms-content-seo cms-content-wide">
+                                <summary>SEO &amp; Sharing</summary>
+                                <div class="cms-seo-fields">
+                                    <label><span>SEO Title</span><input name="seoTitle" maxlength="180"></label>
+                                    <label><span>Meta Description</span><textarea name="metaDescription" rows="2" maxlength="320"></textarea></label>
+                                    <label><span>Open Graph Title</span><input name="ogTitle" maxlength="180"></label>
+                                    <label><span>Open Graph Description</span><textarea name="ogDescription" rows="2" maxlength="320"></textarea></label>
+                                    <label><span>Open Graph Image</span><input name="ogImage" placeholder="https://example.com/image.jpg or img/image.jpg"><small>HTTP(S) URL or site-relative path.</small></label>
+                                    <label><span>Cover Alt Text</span><input name="coverAlt" maxlength="255"></label>
+                                    <label class="admin-checkbox"><input type="checkbox" name="noindex"><span>Noindex — request exclusion from search indexing</span></label>
+                                </div>
+                            </details>
                             <div class="admin-form-actions cms-content-wide"><button type="submit" class="cms-button cms-button-primary" data-content-save>Save Draft</button><button type="button" class="cms-button" data-content-publish>Publish</button><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Cancel</button></div>
                             <p class="cms-form-message cms-content-wide" data-content-form-message role="status"></p>
                         </form>
@@ -176,6 +198,6 @@
         </div>
     </main>
 
-    <script src="script.js?v=20261002.5"></script>
+    <script src="script.js?v=20261004.c1"></script>
 </body>
 </html>

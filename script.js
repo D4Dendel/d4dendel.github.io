@@ -1,192 +1,196 @@
 const menuToggle = document.querySelector('.menu-toggle');
 const nav = document.querySelector('.nav');
 
-const pointerCanvas = document.createElement('canvas');
-pointerCanvas.className = 'pointer-canvas';
-pointerCanvas.setAttribute('aria-hidden', 'true');
-document.body.prepend(pointerCanvas);
-
-const canvasContext = pointerCanvas.getContext('2d');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const isMobileViewport = window.matchMedia('(max-width: 760px)').matches;
-const brushColors = [
-  { name: 'Coral', value: '243, 168, 137' },
-  { name: 'Terracotta', value: '200, 111, 82' },
-  { name: 'Blue', value: '93, 145, 183' },
-  { name: 'Golden yellow', value: '221, 169, 72' },
-  { name: 'Plum', value: '126, 84, 116' }
-];
-let selectedBrushColor = brushColors[0].value;
-let canvasScale = 1;
-let lastPointerPosition = null;
 
-const brushPalette = document.createElement('div');
-brushPalette.className = 'brush-palette';
-brushPalette.setAttribute('aria-label', 'Brush color');
-brushPalette.innerHTML = brushColors.map((color, index) => `
-  <button class="brush-swatch${index === 0 ? ' is-selected' : ''}" type="button"
-    style="--swatch-color: rgb(${color.value})" data-brush-color="${color.value}"
-    aria-label="${color.name}" aria-pressed="${index === 0}"></button>
-`).join('');
-document.body.append(brushPalette);
+// Public personalization creates no floating elements or listeners inside the CMS.
+if (document.body.dataset.page !== 'admin') {
+  const pointerCanvas = document.createElement('canvas');
+  pointerCanvas.className = 'pointer-canvas';
+  pointerCanvas.setAttribute('aria-hidden', 'true');
+  document.body.prepend(pointerCanvas);
 
-let contactMascot = document.querySelector('.contact-mascot');
-if (!contactMascot) {
-  contactMascot = document.createElement('img');
-  contactMascot.className = 'contact-mascot';
-  contactMascot.alt = 'Dyndel Pino mascot illustration';
-  const iconHref = document.querySelector('link[rel="icon"]')?.href;
-  contactMascot.src = iconHref ? new URL('mascot.gif', iconHref).href : 'img/mascot.gif';
-  document.body.append(contactMascot);
-} else {
-  document.body.append(contactMascot);
-}
-const syncMascotToPalette = () => {
-  if (!contactMascot) return;
-  const paletteRect = brushPalette.getBoundingClientRect();
-  if (!paletteRect.width || window.matchMedia('(max-width: 760px)').matches) return;
-  contactMascot.style.bottom = `${window.innerHeight - paletteRect.top}px`;
-  contactMascot.style.right = `${window.innerWidth - paletteRect.right}px`;
-};
+  const canvasContext = pointerCanvas.getContext('2d');
+  const brushColors = [
+    { name: 'Coral', value: '243, 168, 137' },
+    { name: 'Terracotta', value: '200, 111, 82' },
+    { name: 'Blue', value: '93, 145, 183' },
+    { name: 'Golden yellow', value: '221, 169, 72' },
+    { name: 'Plum', value: '126, 84, 116' }
+  ];
+  let selectedBrushColor = brushColors[0].value;
+  let canvasScale = 1;
+  let lastPointerPosition = null;
 
-syncMascotToPalette();
-window.addEventListener('resize', syncMascotToPalette);
+  const brushPalette = document.createElement('div');
+  brushPalette.className = 'brush-palette';
+  brushPalette.setAttribute('aria-label', 'Brush color');
+  brushPalette.innerHTML = brushColors.map((color, index) => `
+    <button class="brush-swatch${index === 0 ? ' is-selected' : ''}" type="button"
+      style="--swatch-color: rgb(${color.value})" data-brush-color="${color.value}"
+      aria-label="${color.name}" aria-pressed="${index === 0}"></button>
+  `).join('');
+  document.body.append(brushPalette);
 
-let paletteDrag = null;
-let suppressPaletteClick = false;
-
-brushPalette.addEventListener('pointerdown', (event) => {
-  if (event.target.closest('.brush-swatch')) return;
-
-  const paletteRect = brushPalette.getBoundingClientRect();
-  paletteDrag = {
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    left: paletteRect.left,
-    top: paletteRect.top,
-    moved: false
+  let contactMascot = document.querySelector('.contact-mascot');
+  if (!contactMascot) {
+    contactMascot = document.createElement('img');
+    contactMascot.className = 'contact-mascot';
+    contactMascot.alt = 'Dyndel Pino mascot illustration';
+    const iconHref = document.querySelector('link[rel="icon"]')?.href;
+    contactMascot.src = iconHref ? new URL('mascot.gif', iconHref).href : 'img/mascot.gif';
+    document.body.append(contactMascot);
+  } else {
+    document.body.append(contactMascot);
+  }
+  const syncMascotToPalette = () => {
+    if (!contactMascot) return;
+    const paletteRect = brushPalette.getBoundingClientRect();
+    if (!paletteRect.width || window.matchMedia('(max-width: 760px)').matches) return;
+    contactMascot.style.bottom = `${window.innerHeight - paletteRect.top}px`;
+    contactMascot.style.right = `${window.innerWidth - paletteRect.right}px`;
   };
-  brushPalette.setPointerCapture(event.pointerId);
-  brushPalette.classList.add('is-dragging');
-});
 
-brushPalette.addEventListener('pointermove', (event) => {
-  if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
-
-  const moveX = event.clientX - paletteDrag.startX;
-  const moveY = event.clientY - paletteDrag.startY;
-  paletteDrag.moved = paletteDrag.moved || Math.hypot(moveX, moveY) > 4;
-  const maxLeft = window.innerWidth - brushPalette.offsetWidth - 10;
-  const maxTop = window.innerHeight - brushPalette.offsetHeight - 10;
-  const nextLeft = Math.max(10, Math.min(maxLeft, paletteDrag.left + moveX));
-  const nextTop = Math.max(10, Math.min(maxTop, paletteDrag.top + moveY));
-
-  brushPalette.style.left = `${nextLeft}px`;
-  brushPalette.style.top = `${nextTop}px`;
-  brushPalette.style.right = 'auto';
-  brushPalette.style.bottom = 'auto';
   syncMascotToPalette();
-});
+  window.addEventListener('resize', syncMascotToPalette);
 
-const stopPaletteDrag = (event) => {
-  if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
-  suppressPaletteClick = paletteDrag.moved;
-  paletteDrag = null;
-  brushPalette.classList.remove('is-dragging');
-};
+  let paletteDrag = null;
+  let suppressPaletteClick = false;
 
-brushPalette.addEventListener('pointerup', stopPaletteDrag);
-brushPalette.addEventListener('pointercancel', stopPaletteDrag);
+  brushPalette.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('.brush-swatch')) return;
 
-brushPalette.addEventListener('click', (event) => {
-  if (suppressPaletteClick) {
-    suppressPaletteClick = false;
-    return;
-  }
-
-  const swatch = event.target.closest('[data-brush-color]');
-  if (!swatch) return;
-
-  selectedBrushColor = swatch.dataset.brushColor;
-  brushPalette.querySelectorAll('.brush-swatch').forEach((button) => {
-    const isSelected = button === swatch;
-    button.classList.toggle('is-selected', isSelected);
-    button.setAttribute('aria-pressed', String(isSelected));
-  });
-});
-
-const resizePointerCanvas = () => {
-  canvasScale = Math.min(window.devicePixelRatio || 1, 2);
-  pointerCanvas.width = Math.floor(window.innerWidth * canvasScale);
-  pointerCanvas.height = Math.floor(window.innerHeight * canvasScale);
-  pointerCanvas.style.width = `${window.innerWidth}px`;
-  pointerCanvas.style.height = `${window.innerHeight}px`;
-  canvasContext.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
-};
-
-const drawBrushStamp = (x, y, pressure = 1) => {
-  const brushSize = 34 + Math.random() * 30;
-  const markCount = 10;
-
-  for (let index = 0; index < markCount; index += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * brushSize * 0.55;
-    const radius = brushSize * (0.18 + Math.random() * 0.2) * pressure;
-    const markX = x + Math.cos(angle) * distance;
-    const markY = y + Math.sin(angle) * distance;
-    const gradient = canvasContext.createRadialGradient(markX, markY, 0, markX, markY, radius);
-    const color = selectedBrushColor;
-
-    gradient.addColorStop(0, `rgba(${color}, ${0.08 + Math.random() * 0.1})`);
-    gradient.addColorStop(1, `rgba(${color}, 0)`);
-    canvasContext.fillStyle = gradient;
-    canvasContext.beginPath();
-    canvasContext.arc(markX, markY, radius, 0, Math.PI * 2);
-    canvasContext.fill();
-  }
-};
-
-const paintBetween = (from, to, pressure = 1) => {
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  const steps = Math.max(1, Math.ceil(distance / 18));
-
-  for (let step = 1; step <= steps; step += 1) {
-    const progress = step / steps;
-    drawBrushStamp(
-      from.x + (to.x - from.x) * progress,
-      from.y + (to.y - from.y) * progress,
-      pressure
-    );
-  }
-};
-
-if (canvasContext && !reducedMotion.matches && !isMobileViewport) {
-  resizePointerCanvas();
-  window.addEventListener('resize', resizePointerCanvas);
-  window.addEventListener('pointermove', (event) => {
-    const currentPosition = { x: event.clientX, y: event.clientY };
-    if (lastPointerPosition) {
-      paintBetween(lastPointerPosition, currentPosition, event.pressure || 1);
-    } else {
-      drawBrushStamp(currentPosition.x, currentPosition.y, event.pressure || 1);
-    }
-    lastPointerPosition = currentPosition;
-  });
-  window.addEventListener('pointerout', (event) => {
-    if (!event.relatedTarget) lastPointerPosition = null;
+    const paletteRect = brushPalette.getBoundingClientRect();
+    paletteDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: paletteRect.left,
+      top: paletteRect.top,
+      moved: false
+    };
+    brushPalette.setPointerCapture(event.pointerId);
+    brushPalette.classList.add('is-dragging');
   });
 
-  const fadeCanvas = () => {
-    canvasContext.save();
-    canvasContext.globalCompositeOperation = 'destination-out';
-    canvasContext.fillStyle = 'rgba(0, 0, 0, 0.018)';
-    canvasContext.fillRect(0, 0, window.innerWidth, window.innerHeight);
-    canvasContext.restore();
-    window.requestAnimationFrame(fadeCanvas);
+  brushPalette.addEventListener('pointermove', (event) => {
+    if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
+
+    const moveX = event.clientX - paletteDrag.startX;
+    const moveY = event.clientY - paletteDrag.startY;
+    paletteDrag.moved = paletteDrag.moved || Math.hypot(moveX, moveY) > 4;
+    const maxLeft = window.innerWidth - brushPalette.offsetWidth - 10;
+    const maxTop = window.innerHeight - brushPalette.offsetHeight - 10;
+    const nextLeft = Math.max(10, Math.min(maxLeft, paletteDrag.left + moveX));
+    const nextTop = Math.max(10, Math.min(maxTop, paletteDrag.top + moveY));
+
+    brushPalette.style.left = `${nextLeft}px`;
+    brushPalette.style.top = `${nextTop}px`;
+    brushPalette.style.right = 'auto';
+    brushPalette.style.bottom = 'auto';
+    syncMascotToPalette();
+  });
+
+  const stopPaletteDrag = (event) => {
+    if (!paletteDrag || event.pointerId !== paletteDrag.pointerId) return;
+    suppressPaletteClick = paletteDrag.moved;
+    paletteDrag = null;
+    brushPalette.classList.remove('is-dragging');
   };
 
-  window.requestAnimationFrame(fadeCanvas);
+  brushPalette.addEventListener('pointerup', stopPaletteDrag);
+  brushPalette.addEventListener('pointercancel', stopPaletteDrag);
+
+  brushPalette.addEventListener('click', (event) => {
+    if (suppressPaletteClick) {
+      suppressPaletteClick = false;
+      return;
+    }
+
+    const swatch = event.target.closest('[data-brush-color]');
+    if (!swatch) return;
+
+    selectedBrushColor = swatch.dataset.brushColor;
+    brushPalette.querySelectorAll('.brush-swatch').forEach((button) => {
+      const isSelected = button === swatch;
+      button.classList.toggle('is-selected', isSelected);
+      button.setAttribute('aria-pressed', String(isSelected));
+    });
+  });
+
+  const resizePointerCanvas = () => {
+    canvasScale = Math.min(window.devicePixelRatio || 1, 2);
+    pointerCanvas.width = Math.floor(window.innerWidth * canvasScale);
+    pointerCanvas.height = Math.floor(window.innerHeight * canvasScale);
+    pointerCanvas.style.width = `${window.innerWidth}px`;
+    pointerCanvas.style.height = `${window.innerHeight}px`;
+    canvasContext.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
+  };
+
+  const drawBrushStamp = (x, y, pressure = 1) => {
+    const brushSize = 34 + Math.random() * 30;
+    const markCount = 10;
+
+    for (let index = 0; index < markCount; index += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * brushSize * 0.55;
+      const radius = brushSize * (0.18 + Math.random() * 0.2) * pressure;
+      const markX = x + Math.cos(angle) * distance;
+      const markY = y + Math.sin(angle) * distance;
+      const gradient = canvasContext.createRadialGradient(markX, markY, 0, markX, markY, radius);
+      const color = selectedBrushColor;
+
+      gradient.addColorStop(0, `rgba(${color}, ${0.08 + Math.random() * 0.1})`);
+      gradient.addColorStop(1, `rgba(${color}, 0)`);
+      canvasContext.fillStyle = gradient;
+      canvasContext.beginPath();
+      canvasContext.arc(markX, markY, radius, 0, Math.PI * 2);
+      canvasContext.fill();
+    }
+  };
+
+  const paintBetween = (from, to, pressure = 1) => {
+    const distance = Math.hypot(to.x - from.x, to.y - from.y);
+    const steps = Math.max(1, Math.ceil(distance / 18));
+
+    for (let step = 1; step <= steps; step += 1) {
+      const progress = step / steps;
+      drawBrushStamp(
+        from.x + (to.x - from.x) * progress,
+        from.y + (to.y - from.y) * progress,
+        pressure
+      );
+    }
+  };
+
+  if (canvasContext && !reducedMotion.matches && !isMobileViewport) {
+    resizePointerCanvas();
+    window.addEventListener('resize', resizePointerCanvas);
+    window.addEventListener('pointermove', (event) => {
+      const currentPosition = { x: event.clientX, y: event.clientY };
+      if (lastPointerPosition) {
+        paintBetween(lastPointerPosition, currentPosition, event.pressure || 1);
+      } else {
+        drawBrushStamp(currentPosition.x, currentPosition.y, event.pressure || 1);
+      }
+      lastPointerPosition = currentPosition;
+    });
+    window.addEventListener('pointerout', (event) => {
+      if (!event.relatedTarget) lastPointerPosition = null;
+    });
+
+    const fadeCanvas = () => {
+      canvasContext.save();
+      canvasContext.globalCompositeOperation = 'destination-out';
+      canvasContext.fillStyle = 'rgba(0, 0, 0, 0.018)';
+      canvasContext.fillRect(0, 0, window.innerWidth, window.innerHeight);
+      canvasContext.restore();
+      window.requestAnimationFrame(fadeCanvas);
+    };
+
+    window.requestAnimationFrame(fadeCanvas);
+  }
 }
 
 if (menuToggle && nav) {
@@ -1327,7 +1331,7 @@ document.querySelector('[data-theme-reset]')?.addEventListener('click', async ()
 
 const renderAdminContent = async () => {
   const list = document.getElementById('content-list');
-  if (!list || !useCmsApi) return;
+  if (!list || !useCmsApi) return false;
   try {
     cmsContentEntries = (await cmsRequest('admin-content')).entries;
     list.replaceChildren();
@@ -1340,7 +1344,7 @@ const renderAdminContent = async () => {
       note.textContent = 'Create a draft or publish a new blog, news, update, or announcement.';
       empty.append(heading, note);
       list.append(empty);
-      return;
+      return true;
     }
     cmsContentEntries.forEach((entry) => {
       const row = document.createElement('article');
@@ -1379,13 +1383,403 @@ const renderAdminContent = async () => {
       row.append(main, actions);
       list.append(row);
     });
+    return true;
   } catch (error) {
     list.textContent = `Content list unavailable: ${error.message}`;
+    return false;
   }
 };
 
 const contentForm = document.getElementById('content-form');
 const contentCoverPreview = document.querySelector('[data-content-cover-preview]');
+const contentBlockList = document.querySelector('[data-content-block-list]');
+const contentBlockLabels = {
+  paragraph: 'Paragraph', heading: 'Heading', image: 'Image', image_caption: 'Image + Caption',
+  video: 'YouTube Video', quote: 'Quote', divider: 'Divider', gallery: 'Gallery'
+};
+// An empty loaded article is intentional. An uninitialized or mismatched editor must omit blocks.
+let contentBlockState = { initialized: false, entryId: null, blocks: [] };
+let contentSaving = false;
+const contentMediaUploadState = new WeakMap();
+const pendingContentUploads = new Set();
+
+const syncContentSaveButtons = () => {
+  const pending = [...pendingContentUploads].some((upload) => upload.editor === contentBlockState);
+  document.querySelectorAll('[data-content-save], [data-content-publish]').forEach((button) => {
+    button.disabled = contentSaving || pending;
+  });
+};
+
+const contentEditorMatchesEntry = () => contentBlockState.initialized
+  && contentBlockState.entryId === String(contentForm?.elements.id.value || '');
+
+const normalizeContentYoutubeId = (value) => {
+  const input = value.trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+  try {
+    const url = new URL(input);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    const host = url.hostname.toLowerCase();
+    let id = null;
+    if (['youtu.be', 'www.youtu.be'].includes(host)) id = url.pathname.slice(1);
+    if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(host)) {
+      id = url.pathname === '/watch' ? url.searchParams.get('v') : url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)\/?$/)?.[1];
+    }
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  } catch { return null; }
+};
+
+const validContentMediaUrl = (value) => {
+  const input = value.trim();
+  if (!input || [...input].length > 255 || /[\u0000-\u0020\u007f]/.test(input)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input) || input.startsWith('//')) {
+    try {
+      const url = new URL(input);
+      return /^https?:\/\/[^/]/i.test(input) && ['http:', 'https:'].includes(url.protocol)
+        && Boolean(url.hostname) && !url.username && !url.password && !input.includes('\\');
+    } catch { return false; }
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*$/.test(input)) return false;
+  let path = input.split('#')[0].split('?')[0];
+  if (!path || /%(?![a-f0-9]{2})/i.test(path)) return false;
+  for (let pass = 0; pass < 8; pass++) {
+    if (path.split('/').some((segment) => segment === '.' || segment === '..') || /[\\\u0000-\u001f\u007f]/.test(path)) return false;
+    // Decode bytes, just as PHP rawurldecode does, without rejecting valid UTF-8 filenames.
+    const decoded = path.replace(/%([a-f0-9]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    if (decoded === path) return true;
+    path = decoded;
+  }
+  return false;
+};
+
+const contentBlockNotice = (text) => {
+  const notice = document.querySelector('[data-content-block-notice]');
+  if (notice) notice.textContent = text;
+};
+
+const contentBlockButton = (text, action, label) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'cms-button cms-button-subtle';
+  button.dataset.blockAction = action;
+  button.textContent = text;
+  button.setAttribute('aria-label', label);
+  return button;
+};
+
+const contentBlockField = (labelText, field, value, options = {}) => {
+  const label = document.createElement('label');
+  const caption = document.createElement('span');
+  caption.textContent = labelText;
+  const input = document.createElement(options.multiline ? 'textarea' : options.level ? 'select' : 'input');
+  input.dataset.blockField = field;
+  if (options.imageIndex !== undefined) input.dataset.galleryIndex = String(options.imageIndex);
+  if (options.level) {
+    [2, 3].forEach((level) => {
+      const option = document.createElement('option');
+      option.value = String(level);
+      option.textContent = `H${level}`;
+      input.append(option);
+    });
+  } else {
+    if (options.multiline) input.rows = 3;
+    else input.type = 'text';
+    if (options.max) input.maxLength = options.max;
+    if (options.required) input.required = true;
+    if (options.media) input.placeholder = 'https://example.com/image.jpg or img/image.jpg';
+  }
+  input.value = value ?? '';
+  label.append(caption, input);
+  if (options.media) {
+    const help = document.createElement('small');
+    help.textContent = 'HTTP(S) URL or site-relative path. Use %20 for spaces.';
+    label.append(help);
+  }
+  return label;
+};
+
+const contentImageFields = (target, imageIndex) => {
+  const group = document.createElement('div');
+  group.className = 'cms-block-media';
+  const state = contentMediaUploadState.get(target);
+  const uploadLabel = document.createElement('label');
+  const uploadTitle = document.createElement('span');
+  uploadTitle.textContent = 'Upload Image';
+  const upload = document.createElement('input');
+  upload.type = 'file';
+  upload.accept = 'image/jpeg,image/png,image/gif,image/webp';
+  upload.dataset.contentImageUpload = '';
+  if (imageIndex !== undefined) upload.dataset.galleryIndex = String(imageIndex);
+  upload.disabled = Boolean(state?.pending);
+  const help = document.createElement('small');
+  help.textContent = 'JPG, PNG, GIF, or WebP. Up to 8MB. Upload starts when you choose a file.';
+  uploadLabel.append(uploadTitle, upload, help);
+  const or = document.createElement('span');
+  or.className = 'cms-media-alternative';
+  or.textContent = 'OR';
+  const url = contentBlockField('Enter Image URL / path', 'url', target.url, { media: true, required: true, imageIndex });
+  url.querySelector('input').disabled = Boolean(state?.pending);
+  const message = document.createElement('p');
+  message.className = 'cms-media-message';
+  message.dataset.contentUploadMessage = '';
+  message.setAttribute('role', 'status');
+  message.textContent = state?.message || '';
+  if (state?.error) message.classList.add('is-error');
+  group.append(uploadLabel, or, url, message);
+  return group;
+};
+
+const renderContentBlocks = () => {
+  if (!contentBlockList) return;
+  contentBlockList.replaceChildren();
+  const ready = contentEditorMatchesEntry();
+  const count = document.querySelector('[data-content-block-count]');
+  if (count) count.textContent = ready ? `${contentBlockState.blocks.length} / 100 blocks` : 'Not loaded';
+  const addButton = document.querySelector('[data-add-content-block]');
+  if (addButton) addButton.disabled = !ready || contentBlockState.blocks.length >= 100;
+  if (!ready || !contentBlockState.blocks.length) {
+    const empty = document.createElement('p');
+    empty.className = 'cms-block-empty';
+    empty.textContent = ready ? 'No structured blocks. Add a block to begin, or keep using the legacy body.'
+      : 'Structured blocks are not loaded. Saving will preserve existing blocks.';
+    contentBlockList.append(empty);
+    return;
+  }
+  contentBlockState.blocks.forEach((block, index) => {
+    const section = document.createElement('section');
+    section.className = 'cms-article-block';
+    section.dataset.blockIndex = String(index);
+    const header = document.createElement('div');
+    header.className = 'cms-block-heading';
+    const title = document.createElement('h4');
+    title.textContent = `${index + 1}. ${contentBlockLabels[block.type]}`;
+    const actions = document.createElement('div');
+    actions.className = 'cms-block-actions';
+    const up = contentBlockButton('↑ Move Up', 'up', `Move block ${index + 1} up`);
+    const down = contentBlockButton('↓ Move Down', 'down', `Move block ${index + 1} down`);
+    up.disabled = index === 0;
+    down.disabled = index === contentBlockState.blocks.length - 1;
+    actions.append(up, down, contentBlockButton('Remove', 'remove', `Remove block ${index + 1}: ${contentBlockLabels[block.type]}`));
+    header.append(title, actions);
+    const fields = document.createElement('div');
+    fields.className = 'cms-block-fields';
+    const payload = block.payload;
+    const field = (label, key, options) => fields.append(contentBlockField(label, key, payload[key], options));
+    if (block.type === 'paragraph') field('Paragraph text', 'text', { multiline: true, max: 20000, required: true });
+    if (block.type === 'heading') {
+      field('Heading text', 'text', { max: 300, required: true });
+      field('Heading level', 'level', { level: true });
+    }
+    if (['image', 'image_caption'].includes(block.type)) {
+      fields.append(contentImageFields(payload));
+      field('Alt text', 'alt', { max: 255 });
+      if (block.type === 'image_caption') field('Caption', 'caption', { max: 500 });
+    }
+    if (block.type === 'video') field('YouTube URL or video ID', 'videoId', { required: true });
+    if (block.type === 'quote') {
+      field('Quote text', 'text', { multiline: true, max: 5000, required: true });
+      field('Attribution (optional)', 'attribution', { max: 300 });
+    }
+    if (block.type === 'divider') {
+      const divider = document.createElement('hr');
+      fields.append(divider);
+    }
+    if (block.type === 'gallery') {
+      payload.images.forEach((item, imageIndex) => {
+        const image = document.createElement('fieldset');
+        image.className = 'cms-gallery-image-fields';
+        const legend = document.createElement('legend');
+        legend.textContent = `Image ${imageIndex + 1}`;
+        image.append(legend,
+          contentImageFields(item, imageIndex),
+          contentBlockField('Alt text', 'alt', item.alt, { max: 255, imageIndex }),
+          contentBlockField('Caption (optional)', 'caption', item.caption, { max: 500, imageIndex }));
+        const remove = contentBlockButton('Remove image', 'remove-image', `Remove image ${imageIndex + 1} from gallery block ${index + 1}`);
+        remove.dataset.galleryIndex = String(imageIndex);
+        remove.disabled = payload.images.length === 1;
+        image.append(remove);
+        fields.append(image);
+      });
+      const addImage = contentBlockButton(`Add image (${payload.images.length} / 20)`, 'add-image', `Add image to gallery block ${index + 1}`);
+      addImage.disabled = payload.images.length >= 20;
+      fields.append(addImage);
+    }
+    section.append(header, fields);
+    contentBlockList.append(section);
+  });
+};
+
+const initializeContentBlocks = (entryId, blocks) => {
+  if (!Array.isArray(blocks) || blocks.some((block) => !Object.hasOwn(contentBlockLabels, block.type) || !block.payload
+    || (block.type === 'gallery' && !Array.isArray(block.payload.images)))) {
+    contentBlockNotice('Could not load structured blocks. Existing blocks will be preserved when saving.');
+    return;
+  }
+  contentBlockState = {
+    initialized: true, entryId: String(entryId || ''),
+    blocks: blocks.map((block) => ({ type: block.type, payload: JSON.parse(JSON.stringify(block.payload)) }))
+  };
+  renderContentBlocks();
+};
+
+document.querySelector('[data-add-content-block]')?.addEventListener('click', () => {
+  if (contentSaving || !contentEditorMatchesEntry() || contentBlockState.blocks.length >= 100) return;
+  const type = document.querySelector('[data-content-block-type]').value;
+  const defaults = {
+    paragraph: { text: '' }, heading: { text: '', level: 2 }, image: { url: '', alt: '' },
+    image_caption: { url: '', alt: '', caption: '' }, video: { provider: 'youtube', videoId: '' },
+    quote: { text: '', attribution: '' }, divider: {}, gallery: { images: [{ url: '', alt: '' }] }
+  };
+  if (!Object.hasOwn(defaults, type)) return;
+  contentBlockState.blocks.push({ type, payload: defaults[type] });
+  renderContentBlocks();
+  contentBlockList.lastElementChild.querySelector('input, textarea, select, button')?.focus();
+  contentBlockNotice(`${contentBlockLabels[type]} added.`);
+});
+
+const updateContentBlockField = (event) => {
+  const input = event.target.closest('[data-block-field]');
+  if (!input || contentSaving || !contentEditorMatchesEntry()) return;
+  const block = contentBlockState.blocks[Number(input.closest('[data-block-index]').dataset.blockIndex)];
+  const target = input.hasAttribute('data-gallery-index') ? block.payload.images[Number(input.dataset.galleryIndex)] : block.payload;
+  target[input.dataset.blockField] = input.dataset.blockField === 'level' ? Number(input.value) : input.value;
+  input.setCustomValidity('');
+};
+contentBlockList?.addEventListener('input', updateContentBlockField);
+contentBlockList?.addEventListener('change', updateContentBlockField);
+contentBlockList?.addEventListener('change', async (event) => {
+  const input = event.target.closest('[data-content-image-upload]');
+  const file = input?.files[0];
+  if (!file || contentSaving || !contentEditorMatchesEntry()) return;
+  const block = contentBlockState.blocks[Number(input.closest('[data-block-index]').dataset.blockIndex)];
+  const target = input.hasAttribute('data-gallery-index') ? block.payload.images[Number(input.dataset.galleryIndex)] : block.payload;
+  const editor = contentBlockState;
+  const upload = { editor, target };
+  const state = { pending: true, message: 'Uploading image…', error: false };
+  contentMediaUploadState.set(target, state);
+  pendingContentUploads.add(upload);
+  renderContentBlocks();
+  syncContentSaveButtons();
+  try {
+    if (!file.size || file.size > 8 * 1024 * 1024) throw new Error('Choose an image file, 8MB or smaller.');
+    const payload = new FormData();
+    payload.set('imageFile', file);
+    const result = await cmsRequest('content-media-upload', { method: 'POST', body: payload });
+    if (!validContentMediaUrl(result.url || '')) throw new Error('The upload did not return a valid image path.');
+    // Object references keep a late response attached to its original item even after reordering.
+    const stillPresent = editor === contentBlockState && contentEditorMatchesEntry() && editor.blocks.some((item) =>
+      item.payload === target || (item.type === 'gallery' && item.payload.images.includes(target)));
+    if (stillPresent) target.url = result.url;
+    state.message = 'Image uploaded. Save the entry to keep this image in the article.';
+  } catch (error) {
+    state.error = true;
+    state.message = error.message;
+  } finally {
+    state.pending = false;
+    pendingContentUploads.delete(upload);
+    if (editor === contentBlockState) renderContentBlocks();
+    syncContentSaveButtons();
+  }
+});
+contentBlockList?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-block-action]');
+  if (!button || button.disabled || contentSaving || !contentEditorMatchesEntry()) return;
+  const index = Number(button.closest('[data-block-index]').dataset.blockIndex);
+  const blocks = contentBlockState.blocks;
+  const action = button.dataset.blockAction;
+  let focusIndex = index;
+  if (action === 'remove') {
+    blocks.splice(index, 1);
+    focusIndex = Math.min(index, blocks.length - 1);
+  }
+  if (action === 'up' || action === 'down') {
+    const next = index + (action === 'up' ? -1 : 1);
+    if (next < 0 || next >= blocks.length) return;
+    [blocks[index], blocks[next]] = [blocks[next], blocks[index]];
+    focusIndex = next;
+  }
+  if (action === 'add-image' && blocks[index].payload.images.length < 20) blocks[index].payload.images.push({ url: '', alt: '' });
+  if (action === 'remove-image' && blocks[index].payload.images.length > 1) blocks[index].payload.images.splice(Number(button.dataset.galleryIndex), 1);
+  renderContentBlocks();
+  const section = contentBlockList.querySelector(`[data-block-index="${focusIndex}"]`);
+  if (action === 'add-image') section?.querySelector('.cms-gallery-image-fields:last-of-type input')?.focus();
+  else (section?.querySelector(`[data-block-action="${action}"]:not(:disabled)`) || section?.querySelector('button:not(:disabled)') || document.querySelector('[data-add-content-block]'))?.focus();
+  contentBlockNotice(!blocks.length ? 'All blocks removed. Saving will clear the structured article; the legacy body remains separate.' : 'Article order and fields updated. Save to keep your changes.');
+});
+
+const serializeContentBlocks = () => {
+  if (!contentEditorMatchesEntry()) return null;
+  return contentBlockState.blocks.map(({ type, payload }) => {
+    let data = {};
+    if (type === 'paragraph') data = { text: payload.text };
+    if (type === 'heading') data = { text: payload.text, level: Number(payload.level) };
+    if (type === 'image') data = { url: payload.url, alt: payload.alt };
+    if (type === 'image_caption') data = { url: payload.url, alt: payload.alt, caption: payload.caption };
+    if (type === 'video') data = { provider: 'youtube', videoId: normalizeContentYoutubeId(payload.videoId) };
+    if (type === 'quote') {
+      data = { text: payload.text };
+      if (payload.attribution !== undefined) data.attribution = payload.attribution;
+    }
+    if (type === 'gallery') data = { images: payload.images.map((image) => {
+      const item = { url: image.url, alt: image.alt };
+      if (image.caption !== undefined) item.caption = image.caption;
+      return item;
+    }) };
+    return { type, payload: data };
+  });
+};
+
+const validateContentEntry = () => {
+  const fields = [...contentForm.querySelectorAll('input, textarea, select')];
+  fields.forEach((input) => input.setCustomValidity(''));
+  const bytes = (value) => new TextEncoder().encode(value.trim()).length;
+  const checkText = (input, max, required = false, byteLimit = false) => {
+    const value = input.value.trim();
+    if (required && !value) input.setCustomValidity('Enter text before saving.');
+    else if ((byteLimit ? bytes(value) : [...value].length) > max) input.setCustomValidity(`This field exceeds the ${max} ${byteLimit ? 'byte' : 'character'} limit.`);
+  };
+  checkText(contentForm.elements.title, 180, true, true);
+  checkText(contentForm.elements.body, 100000, true, true);
+  checkText(contentForm.elements.excerpt, 500, false, true);
+  const date = contentForm.elements.publishDate;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value) || new Date(`${date.value}T00:00:00Z`).toISOString().slice(0, 10) !== date.value) date.setCustomValidity('Enter a valid publish date.');
+  ['seoTitle', 'ogTitle', 'metaDescription', 'ogDescription', 'coverAlt'].forEach((key) => {
+    checkText(contentForm.elements[key], ['seoTitle', 'ogTitle'].includes(key) ? 180 : key === 'coverAlt' ? 255 : 320);
+  });
+  const media = (input) => {
+    if (!validContentMediaUrl(input.value)) input.setCustomValidity('Enter a valid HTTP(S) URL or site-relative path without directory traversal.');
+  };
+  if (contentForm.elements.ogImage.value.trim()) media(contentForm.elements.ogImage);
+  if (!contentForm.elements.coverImageFile.files.length && contentForm.elements.coverImage.value.trim()) media(contentForm.elements.coverImage);
+  if (contentEditorMatchesEntry()) {
+    contentBlockList.querySelectorAll('[data-block-field]').forEach((input) => {
+      const block = contentBlockState.blocks[Number(input.closest('[data-block-index]').dataset.blockIndex)];
+      const field = input.dataset.blockField;
+      if (field === 'url') media(input);
+      else if (field === 'videoId' && !normalizeContentYoutubeId(input.value)) input.setCustomValidity('Enter a YouTube URL or an 11-character YouTube video ID.');
+      else if (field === 'level' && !['2', '3'].includes(input.value)) input.setCustomValidity('Choose H2 or H3.');
+      else if (field === 'text') checkText(input, block.type === 'paragraph' ? 20000 : block.type === 'heading' ? 300 : 5000, true);
+      else if (field === 'alt') checkText(input, 255);
+      else if (field === 'caption') checkText(input, 500);
+      else if (field === 'attribution') checkText(input, 300);
+    });
+  }
+  const invalid = fields.find((input) => !input.checkValidity());
+  if (invalid) {
+    const details = invalid.closest('details');
+    if (details) details.open = true;
+    document.querySelector('[data-content-form-message]').textContent = invalid.validationMessage;
+    invalid.focus();
+    invalid.reportValidity();
+    return false;
+  }
+  const blocks = serializeContentBlocks();
+  if (blocks && (blocks.length > 100 || blocks.some((block) => block.type === 'gallery' && (block.payload.images.length < 1 || block.payload.images.length > 20)) || bytes(JSON.stringify(blocks)) > 1048576)) {
+    document.querySelector('[data-content-form-message]').textContent = 'Use at most 100 blocks, 1–20 images per gallery, and 1 MB of block data.';
+    return false;
+  }
+  return true;
+};
 
 const renderContentCoverPreview = (coverImage) => {
   if (!contentCoverPreview) return;
@@ -1402,8 +1796,20 @@ const renderContentCoverPreview = (coverImage) => {
 
 const resetContentForm = () => {
   contentForm?.reset();
+  contentBlockState = { initialized: false, entryId: null, blocks: [] };
+  syncContentSaveButtons();
+  renderContentBlocks();
+  contentBlockNotice('');
+  const seo = document.querySelector('.cms-content-seo');
+  if (seo) seo.open = false;
+  const legacy = document.querySelector('.cms-content-legacy');
+  if (legacy) legacy.open = false;
+  const currentStatus = document.querySelector('[data-content-current-status]');
+  if (currentStatus) currentStatus.textContent = 'New draft';
   if (contentForm) {
     contentForm.elements.id.value = '';
+    contentForm.elements.coverImageFile.value = '';
+    contentForm.querySelectorAll('input, textarea, select').forEach((input) => input.setCustomValidity(''));
     contentForm.elements.publishDate.value = new Date().toISOString().slice(0, 10);
   }
   document.querySelector('[data-content-form-title]').textContent = 'Create content entry';
@@ -1413,10 +1819,13 @@ const resetContentForm = () => {
 };
 
 document.querySelector('[data-open-content-editor]')?.addEventListener('click', () => {
+  if (contentSaving) return;
   resetContentForm();
+  initializeContentBlocks('', []);
   document.querySelector('[data-content-editor]').hidden = false;
 });
 document.querySelectorAll('[data-close-content-editor]').forEach((button) => button.addEventListener('click', () => {
+  if (contentSaving) return;
   document.querySelector('[data-content-editor]').hidden = true;
   resetContentForm();
 }));
@@ -1428,8 +1837,10 @@ function listContentActions() {
   list.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-edit-content]');
     if (editButton) {
+      if (contentSaving) return;
       const entry = cmsContentEntries.find((item) => Number(item.id) === Number(editButton.dataset.editContent));
       if (!entry || !contentForm) return;
+      resetContentForm();
       contentForm.elements.id.value = entry.id;
       contentForm.elements.title.value = entry.title;
       contentForm.elements.slug.value = entry.slug;
@@ -1441,12 +1852,18 @@ function listContentActions() {
       contentForm.elements.excerpt.value = entry.excerpt;
       contentForm.elements.body.value = entry.body;
       contentForm.elements.status.value = entry.status;
+      document.querySelector('[data-content-current-status]').textContent = entry.status === 'published' ? 'Published' : 'Draft';
       contentForm.elements.cardSize.value = entry.cardSize;
       contentForm.elements.featured.checked = entry.featured;
       contentForm.elements.showHome.checked = entry.showHome;
       contentForm.elements.showCard.checked = entry.showCard;
+      ['seoTitle', 'metaDescription', 'ogTitle', 'ogDescription', 'ogImage', 'coverAlt'].forEach((key) => {
+        contentForm.elements[key].value = entry[key] ?? '';
+      });
+      contentForm.elements.noindex.checked = entry.noindex === true || entry.noindex === 1 || entry.noindex === '1';
+      initializeContentBlocks(entry.id, entry.blocks);
       document.querySelector('[data-content-form-title]').textContent = 'Edit content entry';
-      document.querySelector('[data-content-save]').textContent = entry.status === 'published' ? 'Save changes' : 'Save Draft';
+      document.querySelector('[data-content-save]').textContent = 'Save Draft';
       document.querySelector('[data-content-editor]').hidden = false;
       return;
     }
@@ -1463,7 +1880,12 @@ function listContentActions() {
 }
 
 const saveContentEntry = async (status) => {
-  if (!contentForm) return;
+  if (!contentForm || contentSaving) return;
+  if ([...pendingContentUploads].some((upload) => upload.editor === contentBlockState)) {
+    document.querySelector('[data-content-form-message]').textContent = 'Wait for the image upload to finish before saving.';
+    return;
+  }
+  if (!validateContentEntry()) return;
   const message = document.querySelector('[data-content-form-message]');
   const payload = new FormData(contentForm);
   const uploadedCover = payload.get('coverImageFile');
@@ -1472,20 +1894,35 @@ const saveContentEntry = async (status) => {
   payload.set('featured', contentForm.elements.featured.checked ? '1' : '0');
   payload.set('showHome', contentForm.elements.showHome.checked ? '1' : '0');
   payload.set('showCard', contentForm.elements.showCard.checked ? '1' : '0');
+  payload.set('noindex', contentForm.elements.noindex.checked ? '1' : '0');
+  const blocks = serializeContentBlocks();
+  if (blocks !== null) payload.set('blocks', JSON.stringify(blocks));
+  contentSaving = true;
+  syncContentSaveButtons();
+  if (message) message.textContent = 'Saving content…';
   try {
-    await cmsRequest('content-entry', { method: 'POST', body: payload });
-    await renderAdminContent();
+    const result = await cmsRequest('content-entry', { method: 'POST', body: payload });
+    const refreshed = await renderAdminContent();
+    const savedEntry = refreshed && cmsContentEntries.find((entry) => Number(entry.id) === Number(result.id));
+    if (!savedEntry) {
+      if (message) message.textContent = 'Content saved, but its status could not be refreshed. Reload the Content list before editing again.';
+      return;
+    }
     resetContentForm();
-    if (message) message.textContent = status === 'published' ? 'Content published.' : 'Draft saved.';
+    initializeContentBlocks('', []);
+    if (message) message.textContent = savedEntry.status === 'published' ? 'Content published.' : 'Draft saved.';
     await renderPublicContent();
   } catch (error) {
     if (message) message.textContent = error.message;
+  } finally {
+    contentSaving = false;
+    syncContentSaveButtons();
   }
 };
 
 contentForm?.addEventListener('submit', (event) => {
   event.preventDefault();
-  saveContentEntry(contentForm.elements.status.value);
+  saveContentEntry('draft');
 });
 document.querySelector('[data-content-publish]')?.addEventListener('click', () => saveContentEntry('published'));
 
