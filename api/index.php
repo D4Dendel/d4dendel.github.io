@@ -53,6 +53,148 @@ $safeSlug = static function (string $value): string {
     return substr($slug, 0, 180);
 };
 
+$contentText = static function (mixed $value, string $field, int $maxLength, bool $allowEmpty = true): string {
+    if (!is_string($value)) json_response(['error' => "{$field} must be text."], 422);
+    $value = trim($value);
+    if (preg_match('//u', $value) !== 1) json_response(['error' => "{$field} must be valid UTF-8 text."], 422);
+    if (!$allowEmpty && $value === '') json_response(['error' => "{$field} cannot be empty."], 422);
+    if (mb_strlen($value, 'UTF-8') > $maxLength) json_response(['error' => "{$field} must be {$maxLength} characters or fewer."], 422);
+    return $value;
+};
+
+$contentMediaUrl = static function (mixed $value, string $field, int $maxLength = 255) use ($contentText): string {
+    $url = $contentText($value, $field, $maxLength, false);
+    if (preg_match('/[\x00-\x20\x7f]/', $url)) json_response(['error' => "{$field} contains invalid characters."], 422);
+    $parts = parse_url($url);
+    if ($parts === false) json_response(['error' => "{$field} must be a valid HTTP(S) URL or site-relative path."], 422);
+    if (isset($parts['scheme']) || isset($parts['host'])) {
+        if (!filter_var($url, FILTER_VALIDATE_URL) || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true) || empty($parts['host']) || isset($parts['user']) || isset($parts['pass'])) {
+            json_response(['error' => "{$field} must be a valid HTTP(S) URL without credentials."], 422);
+        }
+        return $url;
+    }
+    $path = explode('?', explode('#', $url, 2)[0], 2)[0];
+    if ($path === '' || str_starts_with($path, '/') || str_contains($url, '\\') || preg_match('/[\x00-\x1f\x7f]/', $url) || !preg_match("#\\A[A-Za-z0-9][A-Za-z0-9._~!$&'()*+,;=:@%/?\\x23-]*\\z#D", $url)) {
+        json_response(['error' => "{$field} must be a valid site-relative path."], 422);
+    }
+    if (preg_match('/%(?![a-f0-9]{2})/i', $path)) json_response(['error' => "{$field} contains invalid URL encoding."], 422);
+    $decodedPath = $path;
+    for ($decodeCount = 0; $decodeCount < 8; $decodeCount++) {
+        foreach (explode('/', $decodedPath) as $segment) {
+            if ($segment === '.' || $segment === '..') json_response(['error' => "{$field} cannot traverse directories."], 422);
+        }
+        if (str_contains($decodedPath, '\\') || preg_match('/[\x00-\x1f\x7f]/', $decodedPath)) {
+            json_response(['error' => "{$field} contains invalid path characters."], 422);
+        }
+        $decoded = rawurldecode($decodedPath);
+        if ($decoded === $decodedPath) return $url;
+        $decodedPath = $decoded;
+    }
+    json_response(['error' => "{$field} contains excessive URL encoding."], 422);
+};
+
+$contentBlocks = static function (mixed $raw) use ($contentText, $contentMediaUrl): array {
+    if (!is_string($raw) || strlen($raw) > 1048576) json_response(['error' => 'Blocks must be a JSON list no larger than 1 MB.'], 422);
+    try {
+        $blocks = json_decode($raw, false, 64, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        json_response(['error' => 'Blocks must contain valid JSON.'], 422);
+    }
+    if (!is_array($blocks) || !array_is_list($blocks)) json_response(['error' => 'Blocks must be a JSON list.'], 422);
+    if (count($blocks) > 100) json_response(['error' => 'An article can have no more than 100 blocks.'], 422);
+
+    $types = ['paragraph', 'heading', 'image', 'image_caption', 'video', 'quote', 'divider', 'gallery'];
+    $validated = [];
+    foreach ($blocks as $index => $block) {
+        if (!$block instanceof stdClass) json_response(['error' => 'Each block must be an object.', 'block' => $index], 422);
+        $blockFields = get_object_vars($block);
+        if (array_diff(array_keys($blockFields), ['type', 'payload']) || !isset($blockFields['type'], $blockFields['payload']) || !is_string($blockFields['type'])) {
+            json_response(['error' => 'Each block must contain only type and payload fields.', 'block' => $index], 422);
+        }
+        $type = $blockFields['type'];
+        $payload = $blockFields['payload'];
+        if (!in_array($type, $types, true)) json_response(['error' => 'Unsupported content block type.', 'block' => $index], 422);
+        if (!$payload instanceof stdClass) json_response(['error' => 'Block payload must be an object.', 'block' => $index], 422);
+        $fields = get_object_vars($payload);
+
+        $requireFields = static function (array $required, array $optional = []) use ($fields, $index): void {
+            if (array_diff(array_keys($fields), array_merge($required, $optional)) || array_diff($required, array_keys($fields))) {
+                json_response(['error' => 'Block payload has missing or unsupported fields.', 'block' => $index], 422);
+            }
+        };
+        $imageFields = static function (stdClass $image, int $imageIndex) use ($contentText, $contentMediaUrl, $index): array {
+            $imageData = get_object_vars($image);
+            if (array_diff(array_keys($imageData), ['url', 'alt', 'caption']) || !isset($imageData['url'], $imageData['alt']) || array_key_exists('caption', $imageData) && !is_string($imageData['caption'])) {
+                json_response(['error' => 'Gallery images must contain url and alt, with an optional caption.', 'block' => $index, 'image' => $imageIndex], 422);
+            }
+            $item = [
+                'url' => $contentMediaUrl($imageData['url'], 'Image URL'),
+                'alt' => $contentText($imageData['alt'], 'Image alt text', 255)
+            ];
+            if (array_key_exists('caption', $imageData)) $item['caption'] = $contentText($imageData['caption'], 'Image caption', 500);
+            return $item;
+        };
+
+        switch ($type) {
+            case 'paragraph':
+                $requireFields(['text']);
+                $normalized = ['text' => $contentText($fields['text'], 'Paragraph text', 20000, false)];
+                break;
+            case 'heading':
+                $requireFields(['text', 'level']);
+                if (!is_int($fields['level']) || !in_array($fields['level'], [2, 3], true)) {
+                    json_response(['error' => 'Heading level must be 2 or 3.', 'block' => $index], 422);
+                }
+                $normalized = ['text' => $contentText($fields['text'], 'Heading text', 300, false), 'level' => $fields['level']];
+                break;
+            case 'image':
+                $requireFields(['url', 'alt']);
+                $normalized = [
+                    'url' => $contentMediaUrl($fields['url'], 'Image URL'),
+                    'alt' => $contentText($fields['alt'], 'Image alt text', 255)
+                ];
+                break;
+            case 'image_caption':
+                $requireFields(['url', 'alt', 'caption']);
+                $normalized = [
+                    'url' => $contentMediaUrl($fields['url'], 'Image URL'),
+                    'alt' => $contentText($fields['alt'], 'Image alt text', 255),
+                    'caption' => $contentText($fields['caption'], 'Image caption', 500)
+                ];
+                break;
+            case 'video':
+                $requireFields(['provider', 'videoId']);
+                if ($fields['provider'] !== 'youtube') json_response(['error' => 'Only YouTube video embeds are supported.'], 422);
+                $videoId = $contentText($fields['videoId'], 'YouTube video ID', 11, false);
+                if (!preg_match('/\A[A-Za-z0-9_-]{11}\z/', $videoId)) json_response(['error' => 'YouTube video ID must be exactly 11 valid characters.'], 422);
+                $normalized = ['provider' => 'youtube', 'videoId' => $videoId];
+                break;
+            case 'quote':
+                $requireFields(['text'], ['attribution']);
+                $normalized = ['text' => $contentText($fields['text'], 'Quote text', 5000, false)];
+                if (array_key_exists('attribution', $fields)) $normalized['attribution'] = $contentText($fields['attribution'], 'Quote attribution', 300);
+                break;
+            case 'divider':
+                $requireFields([]);
+                $normalized = new stdClass();
+                break;
+            case 'gallery':
+                $requireFields(['images']);
+                if (!is_array($fields['images']) || !array_is_list($fields['images']) || count($fields['images']) < 1 || count($fields['images']) > 20) {
+                    json_response(['error' => 'Gallery blocks must contain between 1 and 20 images.', 'block' => $index], 422);
+                }
+                $normalized = ['images' => []];
+                foreach ($fields['images'] as $imageIndex => $image) {
+                    if (!$image instanceof stdClass) json_response(['error' => 'Each gallery item must be an object.', 'block' => $index, 'image' => $imageIndex], 422);
+                    $normalized['images'][] = $imageFields($image, $imageIndex);
+                }
+                break;
+        }
+        $validated[] = ['type' => $type, 'payload' => $normalized];
+    }
+    return $validated;
+};
+
 if ($action === 'contact') {
     require_post();
     $name = request_string('name', 160);
@@ -174,19 +316,45 @@ if ($action === 'content' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
 if ($action === 'admin-content' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     require_auth();
-    $entries = db()->query('SELECT id, slug, title, cover_image AS coverImage, type, excerpt, body, publish_date AS publishDate, status, featured, show_home AS showHome, show_card AS showCard, card_size AS cardSize FROM content_entries ORDER BY updated_at DESC, id DESC')->fetchAll();
+    $entries = db()->query('SELECT id, slug, title, cover_image AS coverImage, cover_alt AS coverAlt, type, excerpt, body, publish_date AS publishDate, status, featured, show_home AS showHome, show_card AS showCard, card_size AS cardSize, seo_title AS seoTitle, meta_description AS metaDescription, og_title AS ogTitle, og_description AS ogDescription, og_image AS ogImage, noindex FROM content_entries ORDER BY updated_at DESC, id DESC')->fetchAll();
+    $entryIds = array_column($entries, 'id');
+    $blocksByEntry = [];
+    if ($entryIds) {
+        $placeholders = implode(',', array_fill(0, count($entryIds), '?'));
+        $blockStmt = db()->prepare("SELECT id, content_entry_id AS contentEntryId, block_order AS blockOrder, block_type AS type, payload FROM content_blocks WHERE content_entry_id IN ({$placeholders}) ORDER BY content_entry_id, block_order");
+        $blockStmt->execute($entryIds);
+        foreach ($blockStmt->fetchAll() as $block) {
+            try {
+                $payload = json_decode($block['payload'], false, 64, JSON_THROW_ON_ERROR);
+            } catch (JsonException $error) {
+                throw new RuntimeException('A saved content block contains invalid JSON.', 0, $error);
+            }
+            $entryId = (string)$block['contentEntryId'];
+            $blocksByEntry[$entryId][] = [
+                'id' => (int)$block['id'],
+                'blockOrder' => (int)$block['blockOrder'],
+                'type' => $block['type'],
+                'payload' => $payload
+            ];
+        }
+    }
     foreach ($entries as &$entry) {
         $entry['featured'] = (bool)$entry['featured'];
         $entry['showHome'] = (bool)$entry['showHome'];
         $entry['showCard'] = (bool)$entry['showCard'];
+        $entry['noindex'] = (bool)$entry['noindex'];
+        $entry['blocks'] = $blocksByEntry[(string)$entry['id']] ?? [];
     }
+    unset($entry);
     json_response(['entries' => $entries]);
 }
 
 if ($action === 'content-entry') {
     require_post();
     require_auth();
-    $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+    $idValue = trim((string)($_POST['id'] ?? ''));
+    $id = $idValue === '' ? null : filter_var($idValue, FILTER_VALIDATE_INT);
+    if ($idValue !== '' && (!$id || $id < 1)) json_response(['error' => 'Invalid content entry ID.'], 422);
     $title = request_string('title', 180);
     $body = trim((string)($_POST['body'] ?? ''));
     if ($body === '' || strlen($body) > 100000) json_response(['error' => 'Content body is required and must be 100,000 characters or fewer.'], 422);
@@ -210,25 +378,39 @@ if ($action === 'content-entry') {
     $slug = $safeSlug(trim((string)($_POST['slug'] ?? '')) ?: $title);
     if ($slug === '') json_response(['error' => 'Enter a title that can form a valid slug.'], 422);
 
-    $existing = null;
-    if ($id) {
-        $existingStmt = db()->prepare('SELECT cover_image FROM content_entries WHERE id = ?');
-        $existingStmt->execute([$id]);
-        $existing = $existingStmt->fetch();
-        if (!$existing) json_response(['error' => 'Content entry not found.'], 404);
+    $blocksSubmitted = array_key_exists('blocks', $_POST);
+    $blocks = $blocksSubmitted ? $contentBlocks($_POST['blocks']) : null;
+    $seoFields = [
+        'seoTitle' => ['column' => 'seo_title', 'max' => 180],
+        'metaDescription' => ['column' => 'meta_description', 'max' => 320],
+        'ogTitle' => ['column' => 'og_title', 'max' => 180],
+        'ogDescription' => ['column' => 'og_description', 'max' => 320],
+        'coverAlt' => ['column' => 'cover_alt', 'max' => 255]
+    ];
+    $seoValues = [];
+    foreach ($seoFields as $field => $config) {
+        $seoValues[$field] = array_key_exists($field, $_POST)
+            ? $contentText($_POST[$field], $field, $config['max'])
+            : null;
+        if ($seoValues[$field] === '') $seoValues[$field] = null;
     }
-    $duplicate = db()->prepare('SELECT id FROM content_entries WHERE slug = ? AND (? IS NULL OR id <> ?) LIMIT 1');
-    $duplicate->execute([$slug, $id, $id]);
-    if ($duplicate->fetch()) json_response(['error' => 'That content slug is already in use.'], 422);
+    $seoValues['ogImage'] = null;
+    if (array_key_exists('ogImage', $_POST) && !is_string($_POST['ogImage'])) {
+        json_response(['error' => 'Open Graph image URL must be text.'], 422);
+    } elseif (array_key_exists('ogImage', $_POST) && trim($_POST['ogImage']) !== '') {
+        $seoValues['ogImage'] = $contentMediaUrl($_POST['ogImage'], 'Open Graph image URL');
+    }
+    $noindex = null;
+    if (array_key_exists('noindex', $_POST)) {
+        $noindex = $postBoolean('noindex');
+    }
 
+    if (array_key_exists('coverImage', $_POST) && !is_string($_POST['coverImage'])) {
+        json_response(['error' => 'Cover image URL must be text.'], 422);
+    }
     $coverImage = trim((string)($_POST['coverImage'] ?? ''));
     $hasCoverUpload = isset($_FILES['coverImageFile']) && $_FILES['coverImageFile']['error'] !== UPLOAD_ERR_NO_FILE;
-    if (!$hasCoverUpload && $coverImage !== '' && !filter_var($coverImage, FILTER_VALIDATE_URL)) {
-        json_response(['error' => 'External cover image URL must be a valid HTTP or HTTPS URL.'], 422);
-    }
-    if (!$hasCoverUpload && $coverImage !== '' && !in_array((string)parse_url($coverImage, PHP_URL_SCHEME), ['http', 'https'], true)) {
-        json_response(['error' => 'External cover image URL must use HTTP or HTTPS.'], 422);
-    }
+    if (!$hasCoverUpload && $coverImage !== '') $coverImage = $contentMediaUrl($coverImage, 'Cover image URL');
     $uploadedPath = null;
     if ($hasCoverUpload) {
         $file = $_FILES['coverImageFile'];
@@ -243,19 +425,65 @@ if ($action === 'content-entry') {
         if (!move_uploaded_file($file['tmp_name'], $uploadedPath)) json_response(['error' => 'Could not save cover image.'], 500);
         $coverImage = PROJECT_UPLOAD_URL . 'content/' . $filename;
     }
-    if ($coverImage === '' && $existing) $coverImage = $existing['cover_image'] ?? '';
+    $pdo = db();
     try {
+        $pdo->beginTransaction();
+        $existing = null;
         if ($id) {
-            $stmt = db()->prepare('UPDATE content_entries SET slug = ?, title = ?, cover_image = ?, type = ?, excerpt = ?, body = ?, publish_date = ?, status = ?, featured = ?, show_home = ?, show_card = ?, card_size = ? WHERE id = ?');
-            $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize, $id]);
-            json_response(['updated' => true, 'id' => $id]);
+            $existingStmt = $pdo->prepare('SELECT * FROM content_entries WHERE id = ? FOR UPDATE');
+            $existingStmt->execute([$id]);
+            $existing = $existingStmt->fetch();
+            if (!$existing) {
+                $pdo->rollBack();
+                if ($uploadedPath && is_file($uploadedPath)) unlink($uploadedPath);
+                json_response(['error' => 'Content entry not found.'], 404);
+            }
         }
-        $stmt = db()->prepare('INSERT INTO content_entries (slug, title, cover_image, type, excerpt, body, publish_date, status, featured, show_home, show_card, card_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize]);
-        json_response(['created' => true, 'id' => db()->lastInsertId()], 201);
+        $duplicate = $pdo->prepare('SELECT id FROM content_entries WHERE slug = ? AND (? IS NULL OR id <> ?) LIMIT 1');
+        $duplicate->execute([$slug, $id, $id]);
+        if ($duplicate->fetch()) {
+            $pdo->rollBack();
+            if ($uploadedPath && is_file($uploadedPath)) unlink($uploadedPath);
+            json_response(['error' => 'That content slug is already in use.'], 422);
+        }
+        if ($coverImage === '' && $existing) $coverImage = $existing['cover_image'] ?? '';
+        foreach ($seoFields as $field => $config) {
+            if ($seoValues[$field] === null && !array_key_exists($field, $_POST) && $existing) {
+                $seoValues[$field] = $existing[$config['column']];
+            }
+        }
+        if ($seoValues['ogImage'] === null && !array_key_exists('ogImage', $_POST) && $existing) {
+            $seoValues['ogImage'] = $existing['og_image'];
+        }
+        if ($noindex === null) $noindex = $existing ? (int)$existing['noindex'] : 0;
+
+        if ($id) {
+            $stmt = $pdo->prepare('UPDATE content_entries SET slug = ?, title = ?, cover_image = ?, type = ?, excerpt = ?, body = ?, publish_date = ?, status = ?, featured = ?, show_home = ?, show_card = ?, card_size = ?, seo_title = ?, meta_description = ?, og_title = ?, og_description = ?, og_image = ?, noindex = ?, cover_alt = ? WHERE id = ?');
+            $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize, $seoValues['seoTitle'], $seoValues['metaDescription'], $seoValues['ogTitle'], $seoValues['ogDescription'], $seoValues['ogImage'], $noindex, $seoValues['coverAlt'], $id]);
+            $entryId = (int)$id;
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO content_entries (slug, title, cover_image, type, excerpt, body, publish_date, status, featured, show_home, show_card, card_size, seo_title, meta_description, og_title, og_description, og_image, noindex, cover_alt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$slug, $title, $coverImage ?: null, $type, $excerpt, $body, $publishDate, $status, $featured, $showHome, $showCard, $cardSize, $seoValues['seoTitle'], $seoValues['metaDescription'], $seoValues['ogTitle'], $seoValues['ogDescription'], $seoValues['ogImage'], $noindex, $seoValues['coverAlt']]);
+            $entryId = (int)$pdo->lastInsertId();
+        }
+
+        if ($blocksSubmitted) {
+            $deleteBlocks = $pdo->prepare('DELETE FROM content_blocks WHERE content_entry_id = ?');
+            $deleteBlocks->execute([$entryId]);
+            $insertBlock = $pdo->prepare('INSERT INTO content_blocks (content_entry_id, block_order, block_type, payload) VALUES (?, ?, ?, ?)');
+            foreach ($blocks as $order => $block) {
+                $payload = json_encode($block['payload'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+                $insertBlock->execute([$entryId, $order, $block['type'], $payload]);
+            }
+        }
+        $pdo->commit();
+        json_response([$id ? 'updated' : 'created' => true, 'id' => $entryId], $id ? 200 : 201);
     } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         if ($uploadedPath && is_file($uploadedPath)) unlink($uploadedPath);
-        if ($error instanceof PDOException && (string)$error->getCode() === '23000') json_response(['error' => 'That content slug is already in use.'], 422);
+        if ($error instanceof PDOException && (string)$error->getCode() === '23000' && (int)($error->errorInfo[1] ?? 0) === 1062) {
+            json_response(['error' => 'That content slug is already in use.'], 422);
+        }
         throw $error;
     }
 }
