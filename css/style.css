@@ -3164,3 +3164,197 @@ body.modal-is-open {
         margin-bottom: 8px;
     }
 }
+
+/* Stories uses the public theme tokens, with a simple archive grid independent of Project layouts. */
+.stories-page {
+    min-height: calc(100vh - 195px);
+}
+
+.stories-heading {
+    padding: 24px 0 34px;
+}
+
+.stories-heading h1 {
+    margin-bottom: 12px;
+    font-family: "Patrick Hand", cursive;
+    font-size: clamp(3.4rem, 6vw, 5rem);
+    font-weight: 400;
+    line-height: 1.08;
+}
+
+.stories-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 26px;
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+
+.stories-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.stories-filters .btn {
+    min-height: 44px;
+    width: auto;
+    padding: 8px 16px;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.stories-filters .is-active {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--panel-strong);
+}
+
+.stories-filters button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.stories-count {
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.stories-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 24px;
+}
+
+.story-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel-strong);
+}
+
+.story-card.is-featured {
+    border-color: var(--blue-deep);
+}
+
+.story-cover {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+}
+
+.story-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 24px;
+    overflow-wrap: anywhere;
+}
+
+.story-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    color: var(--blue-deep);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.story-featured {
+    padding-left: 10px;
+    border-left: 1px solid var(--line);
+    color: var(--muted);
+}
+
+.story-copy h2 {
+    font-family: "Patrick Hand", cursive;
+    font-size: 1.9rem;
+    font-weight: 400;
+    line-height: 1.2;
+}
+
+.story-copy p {
+    color: var(--muted);
+    font-size: 0.94rem;
+    line-height: 1.7;
+}
+
+.story-copy time {
+    padding-top: 4px;
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+
+.stories-state {
+    padding: 48px 24px;
+    text-align: center;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+}
+
+.stories-state[hidden],
+.stories-state button[hidden] {
+    display: none;
+}
+
+.stories-state h2 {
+    margin-bottom: 10px;
+    font-family: "Patrick Hand", cursive;
+    font-size: 2rem;
+    font-weight: 400;
+}
+
+.stories-state p,
+.stories-noscript {
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.stories-state .btn {
+    margin-top: 20px;
+    cursor: pointer;
+}
+
+.stories-page button:focus-visible,
+body[data-page="stories"] .nav a:focus-visible,
+body[data-page="stories"] .menu-toggle:focus-visible {
+    outline: 2px solid var(--blue-deep);
+    outline-offset: 4px;
+}
+
+body[data-page="stories"] .nav a[aria-current="page"] {
+    color: var(--blue-deep);
+    opacity: 1;
+    text-decoration: underline;
+    text-underline-offset: 6px;
+}
+
+@media (max-width: 900px) {
+    .stories-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .stories-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .story-copy {
+        padding: 20px;
+    }
+
+    .stories-heading {
+        padding-top: 8px;
+    }
+}

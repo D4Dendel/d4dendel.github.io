@@ -1963,6 +1963,133 @@ const renderPublicContent = async () => {
   }
 };
 
+// The archive consumes only public summary fields. Checkpoint E can add reader links using slug.
+const initializeStoriesArchive = () => {
+  const archive = document.querySelector('[data-stories-archive]');
+  if (!archive) return;
+  const list = archive.querySelector('[data-stories-list]');
+  const results = archive.querySelector('[data-stories-results]');
+  const state = archive.querySelector('[data-stories-state]');
+  const stateHeading = archive.querySelector('[data-stories-state-heading]');
+  const stateCopy = archive.querySelector('[data-stories-state-copy]');
+  const count = archive.querySelector('[data-stories-count]');
+  const retry = archive.querySelector('[data-stories-retry]');
+  const filters = [...archive.querySelectorAll('[data-story-filter]')];
+  const types = { blog: 'Blog', news: 'News', update: 'Update', announcement: 'Announcement' };
+  const emptyTypes = { blog: 'blog posts', news: 'news stories', update: 'updates', announcement: 'announcements' };
+  let entries = [];
+  let activeFilter = 'all';
+  let loading = false;
+
+  const showState = (heading, copy, canRetry = false) => {
+    stateHeading.textContent = heading;
+    stateCopy.textContent = copy;
+    retry.hidden = !canRetry;
+    state.hidden = false;
+  };
+
+  const renderCard = (entry) => {
+    const card = document.createElement('article');
+    card.className = 'story-card';
+    if (entry.featured) card.classList.add('is-featured');
+    if (entry.coverImage && validContentMediaUrl(entry.coverImage)) {
+      const image = document.createElement('img');
+      image.className = 'story-cover';
+      image.src = entry.coverImage;
+      // The public API has no coverAlt. Use the story title without exposing Admin fields.
+      image.alt = `Cover image for ${entry.title}`;
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.addEventListener('error', () => image.remove(), { once: true });
+      card.append(image);
+    }
+    const copy = document.createElement('div');
+    copy.className = 'story-copy';
+    const meta = document.createElement('div');
+    meta.className = 'story-meta';
+    const type = document.createElement('span');
+    type.textContent = types[entry.type];
+    meta.append(type);
+    if (entry.featured) {
+      const featured = document.createElement('span');
+      featured.className = 'story-featured';
+      featured.textContent = 'Featured';
+      meta.append(featured);
+    }
+    // Keep the title non-navigational until story.php exists in Checkpoint E.
+    const title = document.createElement('h2');
+    title.textContent = entry.title;
+    copy.append(meta, title);
+    if (entry.excerpt) {
+      const excerpt = document.createElement('p');
+      excerpt.textContent = entry.excerpt;
+      copy.append(excerpt);
+    }
+    const date = document.createElement('time');
+    date.dateTime = entry.publishDate;
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(entry.publishDate) ? new Date(`${entry.publishDate}T00:00:00Z`) : null;
+    date.textContent = parsed && !Number.isNaN(parsed.valueOf())
+      ? parsed.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+      : entry.publishDate;
+    copy.append(date);
+    card.append(copy);
+    return card;
+  };
+
+  const render = () => {
+    const visible = entries.filter((entry) => activeFilter === 'all' || entry.type === activeFilter);
+    list.replaceChildren(...visible.map(renderCard));
+    count.textContent = `${visible.length} ${visible.length === 1 ? 'story' : 'stories'}`;
+    state.hidden = visible.length > 0;
+    if (!visible.length) {
+      showState(activeFilter === 'all' ? 'Stories are on their way.' : `No ${emptyTypes[activeFilter]} yet.`,
+        activeFilter === 'all' ? 'Check back soon for ideas and notes from the studio.' : 'Try another category, or browse all stories.');
+    }
+  };
+
+  const load = async () => {
+    if (loading) return;
+    loading = true;
+    results.setAttribute('aria-busy', 'true');
+    filters.forEach((button) => { button.disabled = true; });
+    list.replaceChildren();
+    count.textContent = '';
+    showState('Gathering stories…', 'Loading the latest notes from the studio.');
+    try {
+      const data = await cmsRequest('content');
+      if (!Array.isArray(data.entries)) throw new Error('Invalid stories response.');
+      entries = data.entries.filter((entry) => entry.status === 'published' && Object.hasOwn(types, entry.type))
+        .map((entry) => ({
+          slug: entry.slug, title: String(entry.title || ''), coverImage: String(entry.coverImage || ''),
+          type: entry.type, excerpt: String(entry.excerpt || ''), publishDate: String(entry.publishDate || ''),
+          featured: entry.featured === true || entry.featured === 1 || entry.featured === '1'
+        }));
+      // Preserve the API order; homepage/card visibility and cardSize do not filter the archive.
+      filters.forEach((button) => { button.disabled = false; });
+      render();
+    } catch {
+      entries = [];
+      showState('Stories are unavailable right now.', 'Please try again in a little while.', true);
+    } finally {
+      loading = false;
+      results.setAttribute('aria-busy', 'false');
+    }
+  };
+
+  filters.forEach((button) => button.addEventListener('click', () => {
+    if (loading || button.disabled) return;
+    activeFilter = button.dataset.storyFilter;
+    filters.forEach((filter) => {
+      const selected = filter === button;
+      filter.classList.toggle('is-active', selected);
+      filter.setAttribute('aria-pressed', String(selected));
+    });
+    render();
+  }));
+  retry.addEventListener('click', load);
+  load();
+};
+
 const applyPublicTheme = (theme) => {
   const colors = {
     accentColor: '--blue-deep',
@@ -2172,6 +2299,7 @@ renderHomepageGallery();
 renderManagedProjectViews();
 loadPublicTheme();
 renderPublicContent();
+initializeStoriesArchive();
 updateSocialLinks();
 updateAdminVisibility();
 restoreCmsSession();
