@@ -1787,7 +1787,7 @@ const renderContentCoverPreview = (coverImage) => {
   contentCoverPreview.hidden = !coverImage;
   if (!coverImage) return;
   const image = document.createElement('img');
-  image.src = coverImage;
+  image.src = new URL(coverImage, new URL('../', cmsApi)).href;
   image.alt = 'Current saved cover image';
   const note = document.createElement('span');
   note.textContent = 'A cover image is already saved. Leave Upload and External image URL empty to keep it.';
@@ -1963,7 +1963,7 @@ const renderPublicContent = async () => {
   }
 };
 
-// The archive consumes only public summary fields. Checkpoint E can add reader links using slug.
+// The archive consumes public summary fields and links to the published Story reader by slug.
 const initializeStoriesArchive = () => {
   const archive = document.querySelector('[data-stories-archive]');
   if (!archive) return;
@@ -2016,9 +2016,11 @@ const initializeStoriesArchive = () => {
       featured.textContent = 'Featured';
       meta.append(featured);
     }
-    // Keep the title non-navigational until story.php exists in Checkpoint E.
     const title = document.createElement('h2');
-    title.textContent = entry.title;
+    const link = document.createElement('a');
+    link.href = `story.php?slug=${encodeURIComponent(entry.slug)}`;
+    link.textContent = entry.title;
+    title.append(link);
     copy.append(meta, title);
     if (entry.excerpt) {
       const excerpt = document.createElement('p');
