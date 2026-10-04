@@ -307,7 +307,7 @@ body.cms-app {
     min-height: 38px;
     padding: 0 13px;
     border: 1px solid var(--cms-border);
-    border-radius: var(--cms-radius);
+    border-radius: var(--button-radius, var(--cms-radius));
     background: var(--cms-surface);
     color: var(--cms-text);
     font: inherit;
@@ -370,6 +370,10 @@ body.cms-app {
     align-items: start;
 }
 
+#project-list.cms-project-list {
+    align-items: stretch;
+}
+
 .cms-app .project-item {
     border-color: var(--cms-border);
     border-radius: var(--cms-radius);
@@ -377,12 +381,32 @@ body.cms-app {
     box-shadow: none;
 }
 
+#project-list:not(.is-list-view) > .project-item {
+    display: flex;
+    flex-direction: column;
+}
+
 .cms-app .project-item img {
     height: 160px;
 }
 
+#project-list:not(.is-list-view) > .project-item > img {
+    flex: 0 0 160px;
+}
+
 .cms-app .project-item .project-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
     padding: 12px;
+}
+
+#project-list:not(.is-list-view) .project-summary {
+    flex: 1;
+}
+
+#project-list:not(.is-list-view) .admin-item-actions {
+    margin-top: auto;
 }
 
 .cms-app .project-item h3 {
@@ -437,7 +461,7 @@ body.cms-app {
     width: auto;
     min-height: 32px;
     padding: 0 10px;
-    border-radius: var(--cms-radius);
+    border-radius: var(--button-radius, var(--cms-radius));
     font-size: 0.76rem;
     letter-spacing: 0;
     box-shadow: none;

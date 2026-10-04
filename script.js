@@ -1230,7 +1230,7 @@ const applyThemePreview = () => {
   document.body.style.setProperty('--cms-bg', values.pageBackground);
   document.body.style.setProperty('--cms-surface', values.surfaceColor);
   document.body.style.setProperty('--cms-text', values.primaryText);
-  document.body.style.setProperty('--cms-radius', values.buttonRadius);
+  document.body.style.setProperty('--button-radius', values.buttonRadius);
   galleryThemePreview.dataset.galleryLayout = values.galleryLayout;
   galleryThemePreview.dataset.galleryEdge = values.galleryEdge;
   renderGalleryThemePreview();

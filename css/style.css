@@ -2900,10 +2900,31 @@ body.modal-is-open {
     grid-row: span 2;
 }
 
+.home-gallery[data-gallery-layout="editorial"] > .gallery-card:first-child {
+    grid-column: span 2;
+    grid-row: auto;
+}
+
 .gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="tall"] .featured-image,
 .gallery-grid[data-gallery-layout="editorial"] > .gallery-card[data-display-size="featured"] .featured-image {
     height: 100%;
     min-height: 460px;
+}
+
+.home-gallery[data-gallery-layout="editorial"] > .gallery-card:first-child .featured-image {
+    height: 460px;
+}
+
+@media (max-width: 600px) {
+    .home-gallery[data-gallery-layout="editorial"] > .gallery-card:first-child {
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    .home-gallery[data-gallery-layout="editorial"] > .gallery-card:first-child .featured-image {
+        height: 280px;
+        min-height: 0;
+    }
 }
 
 .gallery-grid[data-gallery-edge="rounded"] > .gallery-card {
