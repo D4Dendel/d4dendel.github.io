@@ -144,22 +144,88 @@
 
                 <section class="cms-module" data-admin-module-panel="shop" hidden>
                     <div class="cms-page-heading"><div><span class="cms-kicker">Commerce</span><h1>Shop</h1></div></div>
-                    <section class="cms-editor cms-shop-editor">
-                        <div class="cms-section-heading"><h2 data-product-form-title>Add shop product</h2></div>
-                        <form id="product-form" class="cms-form cms-shop-form">
+                    <section class="cms-editor cms-shop-editor" aria-labelledby="product-editor-title">
+                        <div class="cms-section-heading"><div><span class="cms-kicker">Product editor</span><h2 id="product-editor-title" data-product-form-title>Add product</h2></div></div>
+                        <form id="product-form" class="cms-form cms-product-form" novalidate>
                             <input type="hidden" name="id">
-                            <label><span>SKU</span><input name="sku" required placeholder="PRINT-001"></label>
-                            <label><span>Product title</span><input name="title" required></label>
-                            <label><span>Product image</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-                            <label><span>Image URL</span><input type="url" name="image" placeholder="https://example.com/product.jpg"></label>
-                            <label><span>Description</span><textarea name="description" rows="3" required></textarea></label>
-                            <label><span>Price</span><input type="number" name="price" min="0" step="0.01" required></label>
-                            <label><span>Stock</span><input type="number" name="stock" min="0" step="1" required></label>
-                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary">Save product</button><button type="button" class="cms-button cms-button-subtle" data-cancel-product hidden>Cancel edit</button></div>
+
+                            <fieldset class="cms-product-section cms-product-basic">
+                                <legend>Basic information</legend>
+                                <div class="cms-product-fields cms-product-fields-two">
+                                    <label><span>Product title</span><input name="title" maxlength="160" required></label>
+                                    <label><span>SKU</span><input name="sku" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required placeholder="PRINT-001"></label>
+                                    <label class="cms-product-wide"><span>Slug</span><input name="slug" maxlength="180" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required placeholder="generated-from-title"><small>Generated for new products until you edit it.</small></label>
+                                    <label class="cms-product-wide"><span>Short description</span><textarea name="shortDescription" rows="2" maxlength="500"></textarea></label>
+                                    <label class="cms-product-wide"><span>Full description</span><textarea name="description" rows="4"></textarea></label>
+                                    <label><span>Category <em>Optional</em></span><input name="category" maxlength="80"></label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="cms-product-section">
+                                <legend>Pricing &amp; product</legend>
+                                <div class="cms-product-fields cms-product-fields-two">
+                                    <label><span>Regular price</span><input type="number" name="price" min="0" max="99999999.99" step="0.01" required></label>
+                                    <label><span>Sale price <em>Optional</em></span><input type="number" name="salePrice" min="0.01" max="99999999.99" step="0.01"><small>Must be lower than regular price.</small></label>
+                                    <label><span>Product type</span><select name="productType"><option value="physical">Physical</option><option value="digital">Digital</option></select></label>
+                                    <label><span>Stock</span><input type="number" name="stock" min="0" step="1" required></label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="cms-product-section">
+                                <legend>Publishing</legend>
+                                <p class="cms-product-help">Publication controls public access. Shop visibility controls listings. Stock controls availability.</p>
+                                <div class="cms-product-fields cms-product-fields-two">
+                                    <label><span>Publication status</span><select name="publicationStatus"><option value="draft">Draft</option><option value="published">Published</option></select></label>
+                                    <label><span>Sort order</span><input type="number" name="sortOrder" min="0" step="1" required></label>
+                                </div>
+                                <div class="cms-product-checks">
+                                    <label class="admin-checkbox"><input type="checkbox" name="storefrontVisible" checked><span>Show in Shop listings</span></label>
+                                    <label class="admin-checkbox"><input type="checkbox" name="showWhenSoldOut" checked><span>Keep visible when sold out</span></label>
+                                    <label class="admin-checkbox"><input type="checkbox" name="featured"><span>Featured product</span></label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="cms-product-section">
+                                <legend>Purchase action</legend>
+                                <div class="cms-product-fields">
+                                    <label><span>Customer action</span><select name="purchaseAction"><option value="internal">Internal Cart</option><option value="external">External Link</option><option value="inquiry">Inquiry</option></select></label>
+                                    <label data-product-external-url hidden><span>External URL</span><input type="url" name="externalUrl" maxlength="2048" placeholder="https://example.com/product"></label>
+                                    <p class="cms-product-help" data-product-action-help>Uses the local cart and order form.</p>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="cms-product-section">
+                                <legend>Manual badges</legend>
+                                <p class="cms-product-help">Up to 3 short labels. Sale, Sold Out, and Featured are generated automatically.</p>
+                                <div class="cms-product-badges">
+                                    <label><span>Badge 1</span><input type="text" maxlength="32" data-product-badge></label>
+                                    <label><span>Badge 2</span><input type="text" maxlength="32" data-product-badge></label>
+                                    <label><span>Badge 3</span><input type="text" maxlength="32" data-product-badge></label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="cms-product-section cms-product-media">
+                                <legend>Primary image</legend>
+                                <div class="cms-product-media-layout">
+                                    <div class="cms-product-image-preview" data-product-image-preview hidden><img alt=""><span data-product-image-count></span></div>
+                                    <div class="cms-product-fields">
+                                        <label><span>Upload replacement</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+                                        <label><span>Image URL or site-relative path</span><input type="text" name="image" maxlength="255" placeholder="img/shop/product.jpg"></label>
+                                        <p class="cms-product-help">Replacing the primary image keeps existing secondary gallery images. Gallery management arrives in B4.</p>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <p class="cms-form-message cms-product-message" data-product-form-message role="status" aria-live="polite"></p>
+                            <div class="admin-form-actions cms-product-actions">
+                                <button type="submit" class="cms-button cms-button-primary" data-product-save>Save Draft</button>
+                                <button type="button" class="cms-button" data-product-toggle-publication>Publish</button>
+                                <button type="button" class="cms-button cms-button-subtle" data-cancel-product hidden>Cancel edit</button>
+                            </div>
                         </form>
                     </section>
                     <div class="cms-section-heading"><h2>Inventory</h2></div>
-                    <div id="product-list" class="project-list cms-project-list"></div>
+                    <div id="product-list" class="cms-product-list"></div>
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="theme" hidden>

@@ -588,46 +588,263 @@ const renderManagedProjectViews = async () => {
 
 const adminProductList = document.getElementById('product-list');
 const productForm = document.getElementById('product-form');
+const productFormMessage = document.querySelector('[data-product-form-message]');
+const productBadgeInputs = [...document.querySelectorAll('[data-product-badge]')];
+let adminProducts = [];
+let productSlugManuallyEdited = false;
+let productSubmitting = false;
 
-const resetProductForm = () => {
+const formatProductMoney = (value) => `$${Number(value).toFixed(2)}`;
+
+const setProductMessage = (message = '', state = '') => {
+  if (!productFormMessage) return;
+  productFormMessage.textContent = message;
+  if (state) productFormMessage.dataset.state = state;
+  else delete productFormMessage.dataset.state;
+};
+
+const productSlugFromTitle = (title) => title
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+  .slice(0, 180);
+
+const syncProductPurchaseAction = () => {
+  if (!productForm) return;
+  const action = productForm.elements.purchaseAction.value;
+  const externalField = document.querySelector('[data-product-external-url]');
+  const externalInput = productForm.elements.externalUrl;
+  const help = document.querySelector('[data-product-action-help]');
+  const isExternal = action === 'external';
+  if (externalField) externalField.hidden = !isExternal;
+  if (externalInput) externalInput.required = isExternal;
+  if (help) {
+    help.textContent = action === 'external'
+      ? 'Sends customers to a validated external product page.'
+      : action === 'inquiry'
+        ? 'Uses the site contact and inquiry flow.'
+        : 'Uses the local cart and order form.';
+  }
+};
+
+const syncProductPublishActions = () => {
+  if (!productForm) return;
+  const isEditing = productForm.elements.id.value !== '';
+  const published = productForm.elements.publicationStatus.value === 'published';
+  const save = document.querySelector('[data-product-save]');
+  const toggle = document.querySelector('[data-product-toggle-publication]');
+  if (save) save.textContent = published ? (isEditing ? 'Save Changes' : 'Publish') : 'Save Draft';
+  if (toggle) toggle.textContent = published ? 'Unpublish' : 'Publish';
+  productForm.elements.description.required = published;
+};
+
+const setProductSubmitting = (submitting) => {
+  productSubmitting = submitting;
+  document.querySelectorAll('[data-product-save], [data-product-toggle-publication], [data-cancel-product]').forEach((button) => {
+    button.disabled = submitting;
+  });
+};
+
+const validateProductPricing = () => {
+  if (!productForm) return true;
+  const regularInput = productForm.elements.price;
+  const saleInput = productForm.elements.salePrice;
+  saleInput.setCustomValidity('');
+  if (saleInput.value !== '') {
+    const regular = Number(regularInput.value);
+    const sale = Number(saleInput.value);
+    if (!Number.isFinite(sale) || sale <= 0 || !Number.isFinite(regular) || sale >= regular) {
+      saleInput.setCustomValidity('Sale price must be positive and lower than regular price.');
+    }
+  }
+  return saleInput.validity.valid;
+};
+
+const validateProductBadges = () => {
+  const reserved = new Set(['sale', 'sold out', 'featured']);
+  const seen = new Set();
+  let valid = true;
+  productBadgeInputs.forEach((input) => {
+    input.setCustomValidity('');
+    const label = input.value.trim().replace(/\s+/g, ' ');
+    if (!label) return;
+    const normalized = label.toLocaleLowerCase();
+    if (reserved.has(normalized)) {
+      input.setCustomValidity(`${label} is generated automatically.`);
+      valid = false;
+    } else if (seen.has(normalized)) {
+      input.setCustomValidity('Manual badge labels must be unique.');
+      valid = false;
+    }
+    seen.add(normalized);
+  });
+  return valid;
+};
+
+const syncProductImagePreview = (product = null) => {
+  const preview = document.querySelector('[data-product-image-preview]');
+  if (!preview) return;
+  const image = preview.querySelector('img');
+  const count = preview.querySelector('[data-product-image-count]');
+  if (!product || !product.image) {
+    preview.hidden = true;
+    image.removeAttribute('src');
+    image.alt = '';
+    if (count) count.textContent = '';
+    return;
+  }
+  image.src = product.image;
+  image.alt = product.images?.[0]?.altText || '';
+  if (count) count.textContent = `${product.images.length} product image${product.images.length === 1 ? '' : 's'}`;
+  preview.hidden = false;
+};
+
+const resetProductForm = (clearMessage = true) => {
   productForm?.reset();
-  if (productForm) productForm.elements.id.value = '';
-  document.querySelector('[data-product-form-title]')?.replaceChildren(document.createTextNode('Add shop product'));
+  if (productForm) {
+    productForm.elements.id.value = '';
+    productForm.elements.publicationStatus.value = 'draft';
+    productForm.elements.productType.value = 'physical';
+    productForm.elements.purchaseAction.value = 'internal';
+    productForm.elements.storefrontVisible.checked = true;
+    productForm.elements.showWhenSoldOut.checked = true;
+    productForm.elements.featured.checked = false;
+    productForm.elements.sortOrder.value = String(Math.max(0, ...adminProducts.map((product) => Number(product.sortOrder) || 0)) + 1);
+  }
+  productBadgeInputs.forEach((input) => { input.value = ''; input.setCustomValidity(''); });
+  productSlugManuallyEdited = false;
+  document.querySelector('[data-product-form-title]')?.replaceChildren(document.createTextNode('Add product'));
   const cancel = document.querySelector('[data-cancel-product]');
   if (cancel) cancel.hidden = true;
+  syncProductImagePreview();
+  syncProductPurchaseAction();
+  syncProductPublishActions();
+  if (clearMessage) setProductMessage();
+};
+
+const editAdminProduct = (product) => {
+  if (!productForm) return;
+  productForm.elements.id.value = product.id;
+  productForm.elements.title.value = product.title;
+  productForm.elements.sku.value = product.sku;
+  productForm.elements.slug.value = product.slug;
+  productForm.elements.shortDescription.value = product.shortDescription;
+  productForm.elements.description.value = product.description;
+  productForm.elements.category.value = product.category || '';
+  productForm.elements.price.value = product.regularPrice;
+  productForm.elements.salePrice.value = product.salePrice || '';
+  productForm.elements.productType.value = product.productType;
+  productForm.elements.stock.value = product.stock;
+  productForm.elements.publicationStatus.value = product.publicationStatus;
+  productForm.elements.storefrontVisible.checked = product.storefrontVisible;
+  productForm.elements.showWhenSoldOut.checked = product.showWhenSoldOut;
+  productForm.elements.featured.checked = product.featured;
+  productForm.elements.sortOrder.value = product.sortOrder;
+  productForm.elements.purchaseAction.value = product.purchaseAction;
+  productForm.elements.externalUrl.value = product.externalUrl || '';
+  productForm.elements.image.value = product.image || '';
+  productBadgeInputs.forEach((input, index) => { input.value = product.manualBadges[index]?.label || ''; });
+  productSlugManuallyEdited = true;
+  document.querySelector('[data-product-form-title]').textContent = 'Edit product';
+  document.querySelector('[data-cancel-product]').hidden = false;
+  syncProductImagePreview(product);
+  syncProductPurchaseAction();
+  syncProductPublishActions();
+  setProductMessage();
+  productForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+const productStatusChip = (text, className = '') => {
+  const chip = document.createElement('span');
+  chip.className = `cms-product-chip${className ? ` ${className}` : ''}`;
+  chip.textContent = text;
+  return chip;
+};
+
+const productActionLabel = (action) => ({ internal: 'Internal Cart', external: 'External Link', inquiry: 'Inquiry' }[action] || action);
+
+const productManagementCard = (product) => {
+  const card = document.createElement('article');
+  card.className = 'cms-product-row';
+  card.dataset.productId = String(product.id);
+  const image = document.createElement('img');
+  image.src = product.image;
+  image.alt = '';
+  image.loading = 'lazy';
+  const main = document.createElement('div');
+  main.className = 'cms-product-row-main';
+  const sku = document.createElement('span');
+  sku.className = 'cms-product-sku';
+  sku.textContent = product.sku;
+  const title = document.createElement('h3');
+  title.textContent = product.title;
+  const meta = document.createElement('p');
+  const priceText = product.onSale
+    ? `${formatProductMoney(product.currentPrice)} sale · ${formatProductMoney(product.regularPrice)} regular`
+    : formatProductMoney(product.currentPrice);
+  meta.textContent = `${priceText} · ${product.stock} in stock · ${productActionLabel(product.purchaseAction)}`;
+  const state = document.createElement('div');
+  state.className = 'cms-product-state';
+  state.append(productStatusChip(product.publicationStatus === 'published' ? 'Published' : 'Draft', `is-${product.publicationStatus}`));
+  state.append(productStatusChip(product.storefrontVisible ? 'Visible' : 'Hidden'));
+  if (!product.available) state.append(productStatusChip('Sold Out', 'is-warning'));
+  main.append(sku, title, meta, state);
+  const actions = document.createElement('div');
+  actions.className = 'admin-item-actions';
+  const edit = document.createElement('button');
+  edit.className = 'cms-button';
+  edit.type = 'button';
+  edit.dataset.editProduct = String(product.id);
+  edit.textContent = 'Edit';
+  edit.addEventListener('click', () => editAdminProduct(product));
+  const remove = document.createElement('button');
+  remove.className = 'cms-button cms-button-danger';
+  remove.type = 'button';
+  remove.dataset.deleteProduct = String(product.id);
+  remove.textContent = 'Delete';
+  remove.addEventListener('click', async () => {
+    if (!window.confirm(`Delete “${product.title}”? This cannot be undone.`)) return;
+    remove.disabled = true;
+    setProductMessage('Deleting product...');
+    try {
+      await cmsRequest('delete-product', { method: 'POST', body: new URLSearchParams({ id: product.id }) });
+      if (productForm?.elements.id.value === String(product.id)) resetProductForm(false);
+      await renderAdminProducts();
+      setProductMessage('Product deleted.', 'success');
+    } catch (error) {
+      remove.disabled = false;
+      setProductMessage(error.message, 'error');
+    }
+  });
+  actions.append(edit, remove);
+  card.append(image, main, actions);
+  return card;
 };
 
 const renderAdminProducts = async () => {
   if (!adminProductList) return;
   try {
-    const products = (await cmsRequest('admin-products')).products;
+    adminProducts = (await cmsRequest('admin-products')).products;
     const productCount = document.querySelector('[data-dashboard-product-count]');
-    if (productCount) productCount.textContent = String(products.length);
-    adminProductList.innerHTML = products.map((product) => `
-      <article class="project-item">
-        <img src="${product.image}" alt="${product.title}">
-        <div class="project-copy"><span class="project-badge">${product.sku}</span><h3>${product.title}</h3><p>${money(product.price)} &middot; ${product.stock} in stock</p><div class="admin-item-actions"><button class="btn btn-secondary" type="button" data-edit-product="${product.id}">Edit</button><button class="btn btn-danger" type="button" data-delete-product="${product.id}">Delete</button></div></div>
-      </article>
-    `).join('');
-    adminProductList.querySelectorAll('[data-edit-product]').forEach((button) => button.addEventListener('click', () => {
-      const product = products.find((item) => Number(item.id) === Number(button.dataset.editProduct));
-      if (!product || !productForm) return;
-      productForm.elements.id.value = product.id;
-      productForm.elements.sku.value = product.sku;
-      productForm.elements.title.value = product.title;
-      productForm.elements.image.value = product.image;
-      productForm.elements.description.value = product.description;
-      productForm.elements.price.value = product.price;
-      productForm.elements.stock.value = product.stock;
-      document.querySelector('[data-product-form-title]').textContent = 'Edit shop product';
-      document.querySelector('[data-cancel-product]').hidden = false;
-      productForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }));
-    adminProductList.querySelectorAll('[data-delete-product]').forEach((button) => button.addEventListener('click', async () => {
-      if (!window.confirm('Delete this product?')) return;
-      try { await cmsRequest('delete-product', { method: 'POST', body: new URLSearchParams({ id: button.dataset.deleteProduct }) }); await renderAdminProducts(); } catch (error) { window.alert(error.message); }
-    }));
-  } catch (error) { adminProductList.innerHTML = `<p class="admin-note">${error.message}</p>`; }
+    if (productCount) productCount.textContent = String(adminProducts.length);
+    adminProductList.replaceChildren();
+    if (!adminProducts.length) {
+      const empty = document.createElement('p');
+      empty.className = 'cms-empty-state';
+      empty.textContent = 'No products yet.';
+      adminProductList.append(empty);
+    } else {
+      adminProductList.append(...adminProducts.map(productManagementCard));
+    }
+    if (!productForm?.elements.id.value) resetProductForm(false);
+  } catch (error) {
+    adminProductList.replaceChildren();
+    const note = document.createElement('p');
+    note.className = 'admin-note';
+    note.textContent = error.message;
+    adminProductList.append(note);
+  }
 };
 
 document.querySelectorAll('[data-admin-module]').forEach((control) => control.addEventListener('click', () => {
@@ -650,10 +867,68 @@ document.querySelector('[data-cancel-project]')?.addEventListener('click', () =>
   document.querySelector('[data-cancel-project]').hidden = true;
 });
 document.querySelector('[data-cancel-product]')?.addEventListener('click', resetProductForm);
+productForm?.elements.title.addEventListener('input', () => {
+  if (!productForm.elements.id.value && !productSlugManuallyEdited) {
+    productForm.elements.slug.value = productSlugFromTitle(productForm.elements.title.value);
+  }
+});
+productForm?.elements.slug.addEventListener('input', () => { productSlugManuallyEdited = true; });
+productForm?.elements.purchaseAction.addEventListener('change', syncProductPurchaseAction);
+productForm?.elements.publicationStatus.addEventListener('change', syncProductPublishActions);
+productForm?.elements.price.addEventListener('input', validateProductPricing);
+productForm?.elements.salePrice.addEventListener('input', validateProductPricing);
+productBadgeInputs.forEach((input) => input.addEventListener('input', validateProductBadges));
+
+const saveAdminProduct = async () => {
+  if (!productForm || productSubmitting) return;
+  validateProductPricing();
+  validateProductBadges();
+  syncProductPurchaseAction();
+  syncProductPublishActions();
+  if (!productForm.reportValidity()) return;
+  const wasEditing = productForm.elements.id.value !== '';
+  const publicationStatus = productForm.elements.publicationStatus.value;
+  const formData = new FormData(productForm);
+  formData.set('storefrontVisible', productForm.elements.storefrontVisible.checked ? '1' : '0');
+  formData.set('showWhenSoldOut', productForm.elements.showWhenSoldOut.checked ? '1' : '0');
+  formData.set('featured', productForm.elements.featured.checked ? '1' : '0');
+  const badges = productBadgeInputs
+    .map((input) => input.value.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .map((label, index) => ({ label, sortOrder: index + 1 }));
+  formData.set('manualBadges', JSON.stringify(badges));
+  setProductSubmitting(true);
+  setProductMessage(publicationStatus === 'published' ? 'Publishing product...' : 'Saving draft...');
+  try {
+    await cmsRequest('product', { method: 'POST', body: formData });
+    await renderAdminProducts();
+    resetProductForm(false);
+    setProductMessage(
+      publicationStatus === 'published'
+        ? (wasEditing ? 'Product changes published.' : 'Product published.')
+        : (wasEditing ? 'Draft changes saved.' : 'Draft saved.'),
+      'success'
+    );
+  } catch (error) {
+    setProductMessage(error.message, 'error');
+  } finally {
+    setProductSubmitting(false);
+  }
+};
+
 productForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
-  try { await cmsRequest('product', { method: 'POST', body: new FormData(productForm) }); resetProductForm(); await renderAdminProducts(); } catch (error) { window.alert(error.message); }
+  await saveAdminProduct();
 });
+
+document.querySelector('[data-product-toggle-publication]')?.addEventListener('click', async () => {
+  if (!productForm || productSubmitting) return;
+  productForm.elements.publicationStatus.value = productForm.elements.publicationStatus.value === 'published' ? 'draft' : 'published';
+  syncProductPublishActions();
+  await saveAdminProduct();
+});
+
+resetProductForm();
 
 const renderHomepageGallery = () => {
   const gallery = document.querySelector('.home-gallery');

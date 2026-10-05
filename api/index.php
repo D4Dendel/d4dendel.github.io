@@ -810,11 +810,14 @@ if ($action === 'product') {
     $primaryReplacement = $uploadedPath ?? ($legacyImage !== '' ? shop_image_path($legacyImage) : null);
     if (!$replaceImages && $primaryReplacement !== null) {
         if ($images) {
-            $images[0]['path'] = $primaryReplacement;
+            if ($images[0]['path'] !== $primaryReplacement) {
+                $images[0]['path'] = $primaryReplacement;
+                $replaceImages = true;
+            }
         } else {
             $images[] = ['path' => $primaryReplacement, 'altText' => '', 'sortOrder' => 1];
+            $replaceImages = true;
         }
-        $replaceImages = true;
     }
     if ($publicationStatus === 'published' && !$images) json_response(['error' => 'Published products require at least one image.'], 422);
     $imageUrl = $images[0]['path'] ?? '';
@@ -883,8 +886,21 @@ if ($action === 'delete-product') {
     require_auth();
     $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
     if (!$id) json_response(['error' => 'Invalid product.'], 422);
-    $stmt = db()->prepare('DELETE FROM shop_products WHERE id = ?');
-    $stmt->execute([$id]);
+    $pdo = db();
+    $orderCheck = $pdo->prepare('SELECT 1 FROM shop_order_items WHERE product_id = ? LIMIT 1');
+    $orderCheck->execute([$id]);
+    if ($orderCheck->fetchColumn()) {
+        json_response(['error' => 'This product belongs to an existing order and cannot be deleted. Unpublish it instead.'], 409);
+    }
+    $stmt = $pdo->prepare('DELETE FROM shop_products WHERE id = ?');
+    try {
+        $stmt->execute([$id]);
+    } catch (PDOException $error) {
+        if ($error->getCode() === '23000') {
+            json_response(['error' => 'This product is still referenced and cannot be deleted. Unpublish it instead.'], 409);
+        }
+        throw $error;
+    }
     json_response(['deleted' => $stmt->rowCount() > 0]);
 }
 

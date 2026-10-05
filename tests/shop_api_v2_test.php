@@ -192,7 +192,9 @@ try {
     $itemStmt->execute([$orderId]);
     $orderItems = $itemStmt->fetchAll();
     test_expect(count($orderItems) === 1 && (int)$orderItems[0]['quantity'] === 5 && $orderItems[0]['price'] === '7.50', 'Aggregated order item snapshot was incorrect.');
-    $checks += 2;
+    [$status, $deleteBlocked] = test_request('delete-product', 'POST', ['id' => $created['internal']['id']], $sessionId);
+    test_expect($status === 409 && str_contains($deleteBlocked['error'] ?? '', 'existing order'), 'Ordered product deletion did not fail safely.');
+    $checks += 3;
 
     foreach ([1, 2, 3] as $existingId) {
         $found = false;

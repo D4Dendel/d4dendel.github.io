@@ -20,6 +20,7 @@ CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 PHP = r"C:\xampp\php\php.exe"
 MYSQL = r"C:\xampp\mysql\bin\mysql.exe"
 DEBUG_PORT = 9334
+ARTIFACT_DIR = os.environ.get("SHOP_UI_ARTIFACT_DIR")
 
 
 def expect(condition, message):
@@ -203,6 +204,15 @@ def js_string(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def capture_screenshot(cdp, filename):
+    if not ARTIFACT_DIR:
+        return
+    os.makedirs(ARTIFACT_DIR, exist_ok=True)
+    result = cdp.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True})
+    with open(os.path.join(ARTIFACT_DIR, filename), "wb") as image:
+        image.write(base64.b64decode(result["data"]))
+
+
 def normalized_preserved(product):
     return {
         "publicationStatus": product["publicationStatus"],
@@ -214,7 +224,9 @@ def normalized_preserved(product):
         "purchaseAction": product["purchaseAction"],
         "externalUrl": product["externalUrl"],
         "salePrice": product["salePrice"],
-        "images": [{key: image[key] for key in ("path", "altText", "sortOrder")} for image in product["images"]],
+        "active": product["active"],
+        "createdAt": product["createdAt"],
+        "images": [{key: image[key] for key in ("id", "path", "altText", "sortOrder")} for image in product["images"]],
         "manualBadges": [{key: badge[key] for key in ("label", "sortOrder")} for badge in product["manualBadges"]],
     }
 
@@ -333,11 +345,11 @@ try:
         "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
     })
     cdp.navigate(BASE + "admin.html")
-    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .project-item').length === 4", 15)
+    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
     cdp.evaluate("window.__shopTestAlerts=[]; window.alert=(message)=>window.__shopTestAlerts.push(String(message)); window.confirm=()=>true")
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
-    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"shop\"]').hidden && document.querySelectorAll('#product-list .project-item').length === 4")
-    expect(cdp.evaluate("document.querySelectorAll('#product-list .project-item').length") == 4, "Desktop Admin Product list did not contain three live products plus fixture")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"shop\"]').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4")
+    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length") == 4, "Desktop Admin Product list did not contain three live products plus fixture")
     checks += 1
 
     cdp.evaluate("document.querySelector('[data-edit-product=\"1\"]').click()")
@@ -352,7 +364,7 @@ try:
     """)
     expect(live_form["id"] == "1" and live_form["sku"] == initial_live[1]["sku"] and live_form["title"] == initial_live[1]["title"], "Edit did not populate the legacy form for a live product")
     expect(live_form["description"] == initial_live[1]["description"] and live_form["price"] == initial_live[1]["price"] and live_form["stock"] == str(initial_live[1]["stock"]), "Legacy edit fields were incomplete")
-    expect(live_form["heading"] == "Edit shop product" and not live_form["cancelHidden"], "Edit mode controls did not activate")
+    expect(live_form["heading"] == "Edit product" and not live_form["cancelHidden"], "Edit mode controls did not activate")
     cdp.evaluate("document.querySelector('[data-cancel-product]').click()")
     expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === '' && document.querySelector('[data-cancel-product]').hidden"), "Cancel did not reset the product form")
     checks += 4
@@ -361,20 +373,96 @@ try:
     fixture_form = cdp.evaluate("""
         (() => { const f=document.querySelector('#product-form'); return {
             id:f.elements.id.value, sku:f.elements.sku.value, title:f.elements.title.value,
+            slug:f.elements.slug.value, shortDescription:f.elements.shortDescription.value,
             image:f.elements.image.value, description:f.elements.description.value,
-            price:f.elements.price.value, stock:f.elements.stock.value, valid:f.checkValidity()
+            price:f.elements.price.value, salePrice:f.elements.salePrice.value,
+            productType:f.elements.productType.value, stock:f.elements.stock.value,
+            publicationStatus:f.elements.publicationStatus.value,
+            storefrontVisible:f.elements.storefrontVisible.checked,
+            showWhenSoldOut:f.elements.showWhenSoldOut.checked,
+            featured:f.elements.featured.checked, sortOrder:f.elements.sortOrder.value,
+            purchaseAction:f.elements.purchaseAction.value, externalUrl:f.elements.externalUrl.value,
+            badges:[...document.querySelectorAll('[data-product-badge]')].map(input => input.value),
+            imageCount:document.querySelector('[data-product-image-count]').textContent,
+            saveText:document.querySelector('[data-product-save]').textContent,
+            toggleText:document.querySelector('[data-product-toggle-publication]').textContent,
+            valid:f.checkValidity()
         }; })()
     """)
-    expect(fixture_form["id"] == str(v2_id) and fixture_form["sku"] == v2_fields["sku"] and fixture_form["valid"], "Disposable V2 product did not populate a valid legacy edit form")
-    updated_description = "Full V2 copy saved through the legacy Admin form."
-    cdp.evaluate(f"document.querySelector('#product-form').elements.description.value={js_string(updated_description)}; document.querySelector('#product-form').requestSubmit()")
-    cdp.wait_for("document.querySelector('#product-form').elements.id.value === '' && document.querySelectorAll('#product-list .project-item').length === 4", 15)
-    expect(cdp.evaluate("window.__shopTestAlerts.length") == 0, "Legacy V2 edit raised an Admin alert")
+    expect(fixture_form["id"] == str(v2_id) and fixture_form["sku"] == v2_fields["sku"] and fixture_form["valid"], "Disposable V2 product did not populate a valid product edit form")
+    expect(fixture_form["slug"] == v2_fields["slug"] and fixture_form["shortDescription"] == v2_fields["shortDescription"] and fixture_form["salePrice"] == v2_fields["salePrice"], "Basic or pricing fields were not populated")
+    expect(fixture_form["productType"] == "digital" and fixture_form["publicationStatus"] == "published" and not fixture_form["storefrontVisible"] and not fixture_form["showWhenSoldOut"] and fixture_form["featured"], "Product type or publishing fields were not populated")
+    expect(fixture_form["sortOrder"] == "777" and fixture_form["purchaseAction"] == "external" and fixture_form["externalUrl"] == v2_fields["externalUrl"], "Ordering or purchase fields were not populated")
+    expect(fixture_form["badges"][0] == "Limited" and fixture_form["imageCount"] == "2 product images", "Badge or image-count information was not populated")
+    expect(fixture_form["saveText"] == "Save Changes" and fixture_form["toggleText"] == "Unpublish", "Published product save actions were incorrect")
+    checks += 5
+    capture_screenshot(cdp, "shop-admin-b3-desktop.png")
+
+    invalid_ux = cdp.evaluate("""
+        (() => {
+            const f=document.querySelector('#product-form');
+            f.elements.salePrice.value=f.elements.price.value;
+            document.querySelector('[data-product-badge]').value='Sale';
+            f.requestSubmit();
+            return {saleValid:f.elements.salePrice.validity.valid, badgeValid:document.querySelector('[data-product-badge]').validity.valid, id:f.elements.id.value};
+        })()
+    """)
+    expect(not invalid_ux["saleValid"] and not invalid_ux["badgeValid"] and invalid_ux["id"] == str(v2_id), "Client validation did not block invalid sale/reserved badge values")
+    cdp.evaluate(f"document.querySelector('#product-form').elements.salePrice.value='15.25'; document.querySelector('[data-product-badge]').value='Limited'; document.querySelector('#product-form').elements.description.value={js_string('Full V2 copy saved through the product editor.')} ; document.querySelector('#product-form').requestSubmit()")
+    updated_description = "Full V2 copy saved through the product editor."
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === '' && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    expect(cdp.evaluate("window.__shopTestAlerts.length") == 0, "V2 edit raised an Admin alert")
     status, after_edit_admin = api_request("admin-products", session_id=session_id)
     after_edit = next(product for product in after_edit_admin["products"] if product["id"] == v2_id)
-    expect(after_edit["description"] == updated_description, "Representable legacy description was not saved")
-    expect(normalized_preserved(after_edit) == preserved_before, "Legacy edit reset one or more omitted V2-only fields")
-    checks += 3
+    expect(after_edit["description"] == updated_description, "Edited description was not saved")
+    expect(normalized_preserved(after_edit) == preserved_before, "Unchanged V2 fields or gallery data were reset")
+    checks += 4
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
+    cdp.evaluate("""
+        (() => {
+            const f=document.querySelector('#product-form');
+            f.elements.price.value='22.00';
+            f.elements.salePrice.value='';
+            f.elements.productType.value='physical';
+            f.elements.storefrontVisible.checked=true;
+            f.elements.showWhenSoldOut.checked=true;
+            f.elements.featured.checked=false;
+            f.elements.sortOrder.value='778';
+            f.elements.purchaseAction.value='inquiry';
+            f.elements.purchaseAction.dispatchEvent(new Event('change', {bubbles:true}));
+            document.querySelector('[data-product-badge]').value='New';
+            f.requestSubmit();
+        })()
+    """)
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, changed_admin = api_request("admin-products", session_id=session_id)
+    changed = next(product for product in changed_admin["products"] if product["id"] == v2_id)
+    expect(changed["id"] == v2_id and changed["sku"] == v2_fields["sku"], "Product identity changed during edit")
+    expect(changed["regularPrice"] == "22.00" and changed["salePrice"] is None and changed["productType"] == "physical", "Price removal or product type edit failed")
+    expect(changed["storefrontVisible"] and changed["showWhenSoldOut"] and not changed["featured"] and changed["sortOrder"] == 778, "Publishing controls did not save")
+    expect(changed["purchaseAction"] == "inquiry" and changed["externalUrl"] is None and changed["manualBadges"][0]["label"] == "New", "Purchase-action or badge changes failed")
+    expect(normalized_preserved(changed)["images"] == preserved_before["images"], "Editing B3 fields changed ordered gallery data")
+    checks += 5
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('#product-form').elements.salePrice.value='18.00'; document.querySelector('#product-form').requestSubmit()")
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, sale_admin = api_request("admin-products", session_id=session_id)
+    sale_product = next(product for product in sale_admin["products"] if product["id"] == v2_id)
+    expect(sale_product["salePrice"] == "18.00" and sale_product["currentPrice"] == "18.00", "Adding a sale price through Admin failed")
+    checks += 1
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('[data-product-toggle-publication]').click()")
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, draft_admin = api_request("admin-products", session_id=session_id)
+    draft_product = next(product for product in draft_admin["products"] if product["id"] == v2_id)
+    expect(draft_product["publicationStatus"] == "draft", "Unpublish action failed")
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('[data-product-toggle-publication]').click()")
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, republished_admin = api_request("admin-products", session_id=session_id)
+    republished = next(product for product in republished_admin["products"] if product["id"] == v2_id)
+    expect(republished["publicationStatus"] == "published", "Publish action failed")
+    checks += 2
 
     legacy_sku = "TEST-UI-LEGACY-" + token.upper()
     legacy_title = "Browser Legacy Product " + token
@@ -384,29 +472,75 @@ try:
             const f=document.querySelector('#product-form');
             f.elements.sku.value={js_string(legacy_sku)};
             f.elements.title.value={js_string(legacy_title)};
+            f.elements.title.dispatchEvent(new Event('input', {{bubbles:true}}));
+            const generated=f.elements.slug.value;
+            f.elements.slug.value={js_string('browser-manual-product-' + token)};
+            f.elements.slug.dispatchEvent(new Event('input', {{bubbles:true}}));
+            f.elements.title.value='Changed ' + f.elements.title.value;
+            f.elements.title.dispatchEvent(new Event('input', {{bubbles:true}}));
+            window.__slugAssist={{generated, manual:f.elements.slug.value}};
             f.elements.image.value={js_string(legacy_image)};
             f.elements.description.value='Legacy browser form product.';
             f.elements.price.value='12.50';
             f.elements.stock.value='2';
+            f.elements.productType.value='digital';
             f.requestSubmit();
         }})()
     """)
-    cdp.wait_for("document.querySelectorAll('#product-list .project-item').length === 5 && document.querySelector('#product-form').elements.sku.value === ''", 15)
+    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 5 && document.querySelector('#product-form').elements.sku.value === ''", 15)
     status, with_legacy = api_request("admin-products", session_id=session_id)
     legacy_product = next(product for product in with_legacy["products"] if product["sku"] == legacy_sku)
     legacy_id = legacy_product["id"]
     fixture_ids.append(legacy_id)
-    expect(legacy_product["title"] == legacy_title and legacy_product["image"] == legacy_image and legacy_product["price"] == "12.50", "Legacy-form create did not preserve submitted fields")
-    checks += 1
+    expect(cdp.evaluate("window.__slugAssist.generated !== '' && window.__slugAssist.manual.startsWith('browser-manual-product-')"), "Slug assistance overwrote a manually edited slug")
+    expect(legacy_product["publicationStatus"] == "draft" and legacy_product["productType"] == "digital" and legacy_product["category"] is None, "Draft creation defaults or optional category failed")
+    expect(legacy_product["image"] == legacy_image and legacy_product["price"] == "12.50", "Draft create did not preserve submitted media or price")
+    checks += 3
 
     cdp.evaluate(f"document.querySelector('[data-edit-product=\"{legacy_id}\"]').click(); document.querySelector('[data-cancel-product]').click()")
     expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === ''"), "Legacy create/edit cancel control failed")
     cdp.evaluate(f"document.querySelector('[data-delete-product=\"{legacy_id}\"]').click()")
-    cdp.wait_for("document.querySelectorAll('#product-list .project-item').length === 4", 15)
+    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
     status, after_delete_admin = api_request("admin-products", session_id=session_id)
     expect(all(product["id"] != legacy_id for product in after_delete_admin["products"]), "Delete control did not remove the disposable legacy product")
     fixture_ids.remove(legacy_id)
     checks += 2
+
+    published_sku = "TEST-UI-PUBLISHED-" + token.upper()
+    published_title = "Published Browser Product " + token
+    cdp.evaluate(f"""
+        (() => {{
+            const f=document.querySelector('#product-form');
+            f.elements.sku.value={js_string(published_sku)};
+            f.elements.title.value={js_string(published_title)};
+            f.elements.title.dispatchEvent(new Event('input', {{bubbles:true}}));
+            f.elements.shortDescription.value='Published short copy.';
+            f.elements.description.value='Published product created through the B3 editor.';
+            f.elements.category.value='Browser Tests';
+            f.elements.image.value={js_string(legacy_image)};
+            f.elements.price.value='30.00';
+            f.elements.salePrice.value='25.00';
+            f.elements.stock.value='1';
+            f.elements.productType.value='physical';
+            f.elements.purchaseAction.value='external';
+            f.elements.purchaseAction.dispatchEvent(new Event('change', {{bubbles:true}}));
+            f.elements.externalUrl.value='https://example.com/browser-product';
+            document.querySelector('[data-product-badge]').value='Limited';
+            document.querySelector('[data-product-toggle-publication]').click();
+        }})()
+    """)
+    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 5 && document.querySelector('#product-form').elements.sku.value === ''", 15)
+    status, with_published = api_request("admin-products", session_id=session_id)
+    published_product = next(product for product in with_published["products"] if product["sku"] == published_sku)
+    published_id = published_product["id"]
+    fixture_ids.append(published_id)
+    expect(published_product["publicationStatus"] == "published" and published_product["category"] == "Browser Tests" and published_product["productType"] == "physical", "Published product creation fields failed")
+    expect(published_product["salePrice"] == "25.00" and published_product["purchaseAction"] == "external" and published_product["externalUrl"] == "https://example.com/browser-product", "Published sale/external configuration failed")
+    expect(published_product["manualBadges"][0]["label"] == "Limited", "Manual badge creation failed")
+    cdp.evaluate(f"document.querySelector('[data-delete-product=\"{published_id}\"]').click()")
+    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    fixture_ids.remove(published_id)
+    checks += 4
 
     status, projects = api_request("projects")
     expect(status == 200, "Projects API failed during browser regression")
@@ -419,17 +553,51 @@ try:
     cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"content\"]').hidden")
     content_dom_count = cdp.evaluate("document.querySelectorAll('#content-list .cms-content-row').length")
     expect(content_dom_count == len(content["entries"]), "Content Admin list did not match its API")
-    checks += 4
+
+    status, theme = api_request("theme")
+    expect(status == 200 and theme.get("theme"), "Theme API failed during browser regression")
+    cdp.evaluate("document.querySelector('[data-admin-module=\"theme\"]').click()")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"theme\"]').hidden")
+    theme_state = cdp.evaluate("""
+        (() => {
+            const form=document.querySelector('#theme-form');
+            form.requestSubmit();
+            return {
+                accent:form.elements.accent.value,
+                previewCards:document.querySelectorAll('[data-gallery-theme-preview] .cms-gallery-preview-card').length,
+                publishEnabled:!document.querySelector('[data-theme-publish]').disabled
+            };
+        })()
+    """)
+    expect(theme_state["accent"].lower() == theme["theme"]["accentColor"].lower() and theme_state["previewCards"] > 0 and theme_state["publishEnabled"], "Theme controls did not load or preview correctly")
+
+    cdp.evaluate("document.querySelector('[data-admin-module=\"settings\"]').click()")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"settings\"]').hidden")
+    settings_state = cdp.evaluate("""
+        (() => {
+            const form=document.querySelector('#social-form');
+            form.elements.instagram.value='https://instagram.com/dyndel-browser-test';
+            form.requestSubmit();
+            const saved=JSON.parse(localStorage.getItem('dyndelSocials') || '{}');
+            return {
+                fieldCount:form.querySelectorAll('input[type="url"]').length,
+                savedInstagram:saved.instagram || ''
+            };
+        })()
+    """)
+    expect(settings_state == {"fieldCount": 4, "savedInstagram": "https://instagram.com/dyndel-browser-test"}, "Settings social-link form did not save in the disposable browser profile")
+    checks += 8
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
     cdp.navigate(BASE + "admin.html")
-    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .project-item').length === 4", 15)
+    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
-    mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .project-item').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth})")
+    mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .cms-product-row').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth})")
     expect(mobile_admin == {"products": 4, "panelHidden": False, "width": 390}, "Mobile Admin Shop regression failed")
     checks += 1
+    capture_screenshot(cdp, "shop-admin-b3-mobile.png")
 
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1
