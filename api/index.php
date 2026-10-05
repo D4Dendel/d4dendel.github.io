@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 session_start();
 require __DIR__ . '/config.php';
+require __DIR__ . '/shop_products.php';
 
 $action = $_GET['action'] ?? 'projects';
 
@@ -211,13 +212,38 @@ if ($action === 'contact') {
 }
 
 if ($action === 'shop' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $stmt = db()->query('SELECT id, sku, title, description, image_url AS image, price, stock FROM shop_products WHERE active = 1 ORDER BY created_at DESC');
-    json_response(['products' => $stmt->fetchAll()]);
+    $pdo = db();
+    $stmt = $pdo->prepare(
+        'SELECT ' . shop_product_columns() . "
+         FROM shop_products
+         WHERE publication_status = 'published'
+           AND storefront_visible = 1
+           AND (stock > 0 OR show_when_sold_out = 1)
+         ORDER BY CASE WHEN stock > 0 THEN 0 ELSE 1 END, sort_order ASC, id ASC"
+    );
+    $stmt->execute();
+    json_response(['products' => shop_products_response($pdo, $stmt->fetchAll())]);
+}
+
+if ($action === 'shop-product' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $slug = trim((string)($_GET['slug'] ?? ''));
+    if (!preg_match('/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/D', $slug) || strlen($slug) > 180) {
+        json_response(['error' => 'Product not found.'], 404);
+    }
+    $pdo = db();
+    $stmt = $pdo->prepare('SELECT ' . shop_product_columns() . " FROM shop_products WHERE slug = ? AND publication_status = 'published' LIMIT 1");
+    $stmt->execute([$slug]);
+    $row = $stmt->fetch();
+    if (!$row) json_response(['error' => 'Product not found.'], 404);
+    json_response(['product' => shop_products_response($pdo, [$row])[0]]);
 }
 
 if ($action === 'admin-products' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     require_auth();
-    json_response(['products' => db()->query('SELECT id, sku, title, description, image_url AS image, price, stock, active FROM shop_products ORDER BY created_at DESC')->fetchAll()]);
+    $pdo = db();
+    $stmt = $pdo->prepare('SELECT ' . shop_product_columns() . ' FROM shop_products ORDER BY sort_order ASC, id ASC');
+    $stmt->execute();
+    json_response(['products' => shop_products_response($pdo, $stmt->fetchAll(), true)]);
 }
 
 if ($action === 'order') {
@@ -225,27 +251,47 @@ if ($action === 'order') {
     $customerName = request_string('customerName', 160);
     $customerEmail = filter_var(trim((string)($_POST['customerEmail'] ?? '')), FILTER_VALIDATE_EMAIL);
     $customerAddress = request_string('customerAddress', 1000);
-    $items = json_decode((string)($_POST['items'] ?? ''), true);
-    if (!$customerEmail || !is_array($items) || !$items) json_response(['error' => 'Complete your contact details and cart.'], 422);
+    try {
+        $items = json_decode((string)($_POST['items'] ?? ''), true, 32, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        $items = null;
+    }
+    if (!$customerEmail || !is_array($items) || !array_is_list($items) || !$items) json_response(['error' => 'Complete your contact details and cart.'], 422);
+
+    $quantities = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) json_response(['error' => 'Invalid cart item.'], 422);
+        $productId = shop_positive_integer($item['id'] ?? null, 'Product ID');
+        $quantity = shop_positive_integer($item['quantity'] ?? null, 'Quantity');
+        $quantities[$productId] = ($quantities[$productId] ?? 0) + $quantity;
+        if ($quantities[$productId] > 4294967295) json_response(['error' => 'Cart quantity is too large.'], 422);
+    }
+    ksort($quantities, SORT_NUMERIC);
 
     $pdo = db();
     $pdo->beginTransaction();
     try {
-        $productStmt = $pdo->prepare('SELECT id, price, stock FROM shop_products WHERE id = ? AND active = 1 FOR UPDATE');
+        $productStmt = $pdo->prepare("SELECT id, price, sale_price, stock, publication_status, purchase_action FROM shop_products WHERE id = ? FOR UPDATE");
         $orderItems = [];
-        $total = 0.0;
-        foreach ($items as $item) {
-            $productId = filter_var($item['id'] ?? null, FILTER_VALIDATE_INT);
-            $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
-            if (!$productId || !$quantity || $quantity < 1) throw new RuntimeException('Invalid cart item.');
+        $totalCents = 0;
+        foreach ($quantities as $productId => $quantity) {
             $productStmt->execute([$productId]);
             $product = $productStmt->fetch();
-            if (!$product || $quantity > (int)$product['stock']) throw new RuntimeException('One item is out of stock.');
-            $total += (float)$product['price'] * $quantity;
-            $orderItems[] = [$productId, $quantity, $product['price']];
+            if (!$product || $product['publication_status'] !== 'published' || $product['purchase_action'] !== 'internal') {
+                throw new RuntimeException('One item is not eligible for local checkout.');
+            }
+            if ($quantity > (int)$product['stock']) throw new RuntimeException('One item is out of stock.');
+            $regular = shop_money($product['price'], 'Stored regular price');
+            $sale = $product['sale_price'] === null ? null : shop_money($product['sale_price'], 'Stored sale price');
+            $unitCents = $sale !== null && $sale['cents'] > 0 && $sale['cents'] < $regular['cents'] ? $sale['cents'] : $regular['cents'];
+            if ($quantity > 0 && $unitCents > intdiv(SHOP_MAX_MONEY_CENTS - $totalCents, $quantity)) {
+                throw new RuntimeException('Order total is too large.');
+            }
+            $totalCents += $unitCents * $quantity;
+            $orderItems[] = [$productId, $quantity, shop_money_from_cents($unitCents)];
         }
         $orderStmt = $pdo->prepare('INSERT INTO shop_orders (customer_name, customer_email, customer_address, total) VALUES (?, ?, ?, ?)');
-        $orderStmt->execute([$customerName, $customerEmail, $customerAddress, $total]);
+        $orderStmt->execute([$customerName, $customerEmail, $customerAddress, shop_money_from_cents($totalCents)]);
         $orderId = $pdo->lastInsertId();
         $itemStmt = $pdo->prepare('INSERT INTO shop_order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)');
         $stockStmt = $pdo->prepare('UPDATE shop_products SET stock = stock - ? WHERE id = ?');
@@ -254,10 +300,18 @@ if ($action === 'order') {
             $stockStmt->execute([$quantity, $productId]);
         }
         $pdo->commit();
-        json_response(['order' => ['id' => $orderId, 'total' => number_format($total, 2, '.', '')]], 201);
-    } catch (Throwable $error) {
+        json_response(['order' => ['id' => (int)$orderId, 'total' => shop_money_from_cents($totalCents)]], 201);
+    } catch (PDOException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Shop order failed: ' . $error->getMessage());
+        json_response(['error' => 'The order could not be completed.'], 500);
+    } catch (RuntimeException $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         json_response(['error' => $error->getMessage()], 422);
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Unexpected Shop order failure: ' . $error->getMessage());
+        json_response(['error' => 'The order could not be completed.'], 500);
     }
 }
 
@@ -666,34 +720,162 @@ if ($action === 'delete-project') {
 if ($action === 'product') {
     require_post();
     require_auth();
-    $title = request_string('title', 160);
-    $sku = request_string('sku', 80);
-    $description = request_string('description', 2000);
-    $price = filter_var($_POST['price'] ?? null, FILTER_VALIDATE_FLOAT);
-    $stock = filter_var($_POST['stock'] ?? null, FILTER_VALIDATE_INT);
-    if ($price === false || $price < 0 || $stock === false || $stock < 0) json_response(['error' => 'Enter a valid price and stock quantity.'], 422);
-    $imageUrl = trim((string)($_POST['image'] ?? ''));
-    if (isset($_FILES['imageFile']) && $_FILES['imageFile']['error'] === UPLOAD_ERR_OK) {
-        $file = $_FILES['imageFile'];
-        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-        if ($file['size'] > MAX_UPLOAD_BYTES || !isset($allowed[$mime])) json_response(['error' => 'Product image must be a JPG, PNG, GIF, or WebP under 8MB.'], 422);
-        $folder = PROJECT_UPLOAD_DIR . 'shop/';
-        if (!is_dir($folder) && !mkdir($folder, 0755, true)) json_response(['error' => 'Shop upload directory is unavailable.'], 500);
-        $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
-        if (!move_uploaded_file($file['tmp_name'], $folder . $filename)) json_response(['error' => 'Could not save product image.'], 500);
-        $imageUrl = PROJECT_UPLOAD_URL . 'shop/' . $filename;
+    $pdo = db();
+    $id = isset($_POST['id']) && $_POST['id'] !== '' ? shop_positive_integer($_POST['id'], 'Product ID') : null;
+    $current = null;
+    $existingImages = [];
+    $existingBadges = [];
+    if ($id !== null) {
+        $stmt = $pdo->prepare('SELECT ' . shop_product_columns() . ' FROM shop_products WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        $current = $stmt->fetch();
+        if (!$current) json_response(['error' => 'Product not found.'], 404);
+        $relations = shop_fetch_relations($pdo, [$id]);
+        foreach ($relations['images'][$id] ?? [] as $image) {
+            $existingImages[] = ['path' => $image['image_path'], 'altText' => $image['alt_text'], 'sortOrder' => (int)$image['sort_order']];
+        }
+        foreach ($relations['badges'][$id] ?? [] as $badge) {
+            $existingBadges[] = ['label' => $badge['label'], 'sortOrder' => (int)$badge['sort_order']];
+        }
     }
-    if ($imageUrl === '') json_response(['error' => 'Add a product image.'], 422);
-    $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
-    if ($id) {
-        $stmt = db()->prepare('UPDATE shop_products SET sku = ?, title = ?, description = ?, image_url = ?, price = ?, stock = ?, active = ? WHERE id = ?');
-        $stmt->execute([$sku, $title, $description, $imageUrl, $price, $stock, ($_POST['active'] ?? '1') === '1' ? 1 : 0, $id]);
-        json_response(['updated' => true]);
+
+    $required = static function (string $key) use ($current): mixed {
+        if (array_key_exists($key, $_POST)) return $_POST[$key];
+        if ($current !== null) return $current[$key];
+        json_response(['error' => "{$key} is required."], 422);
+    };
+    $optional = static function (string $postKey, string $column, mixed $default) use ($current): mixed {
+        if (array_key_exists($postKey, $_POST)) return $_POST[$postKey];
+        return $current !== null ? $current[$column] : $default;
+    };
+
+    $sku = shop_sku($required('sku'));
+    $title = shop_text($required('title'), 'Title', 160, false);
+    $slug = array_key_exists('slug', $_POST)
+        ? shop_slug($_POST['slug'])
+        : ($current !== null ? $current['slug'] : shop_slug_from_title($title));
+    $shortDescription = shop_text($optional('shortDescription', 'short_description', mb_substr((string)$required('description'), 0, 500, 'UTF-8')), 'Short description', 500);
+    $description = shop_text($required('description'), 'Description', 65535);
+    if (strlen($description) > 65535) json_response(['error' => 'Description is too large to store.'], 422);
+    $category = shop_optional_text($optional('category', 'category', null), 'Category', 80);
+    $productType = shop_enum($optional('productType', 'product_type', 'physical'), 'product type', ['physical', 'digital']);
+    $regular = shop_money($required('price'), 'Regular price');
+    $saleRaw = $optional('salePrice', 'sale_price', null);
+    $sale = $saleRaw === null || $saleRaw === '' ? null : shop_money($saleRaw, 'Sale price');
+    if ($sale !== null && ($sale['cents'] <= 0 || $sale['cents'] >= $regular['cents'])) {
+        json_response(['error' => 'Sale price must be positive and lower than regular price.'], 422);
     }
-    $stmt = db()->prepare('INSERT INTO shop_products (sku, title, description, image_url, price, stock, active) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$sku, $title, $description, $imageUrl, $price, $stock, 1]);
-    json_response(['id' => db()->lastInsertId()], 201);
+    $stock = shop_unsigned_integer($required('stock'), 'Stock');
+    $publicationStatus = shop_enum($optional('publicationStatus', 'publication_status', 'published'), 'publication status', ['draft', 'published']);
+    $storefrontVisible = shop_boolean($optional('storefrontVisible', 'storefront_visible', 1), 'storefront visibility');
+    $showWhenSoldOut = shop_boolean($optional('showWhenSoldOut', 'show_when_sold_out', 1), 'sold-out visibility');
+    $featured = shop_boolean($optional('featured', 'featured', 0), 'featured');
+    if (array_key_exists('sortOrder', $_POST)) {
+        $sortOrder = shop_unsigned_integer($_POST['sortOrder'], 'Sort order');
+    } elseif ($current !== null) {
+        $sortOrder = (int)$current['sort_order'];
+    } else {
+        $sortStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM shop_products');
+        $sortStmt->execute();
+        $sortOrder = (int)$sortStmt->fetchColumn();
+    }
+    $purchaseAction = shop_enum($optional('purchaseAction', 'purchase_action', 'internal'), 'purchase action', ['internal', 'external', 'inquiry']);
+    if ($purchaseAction === 'external') {
+        $externalUrl = shop_external_url($optional('externalUrl', 'external_url', null));
+    } else {
+        $externalUrl = null;
+    }
+
+    $replaceImages = array_key_exists('images', $_POST);
+    $images = $replaceImages ? shop_images($_POST['images']) : $existingImages;
+    $uploadedPath = null;
+    if (isset($_FILES['imageFile'])) {
+        $uploadError = (int)($_FILES['imageFile']['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($uploadError !== UPLOAD_ERR_OK && $uploadError !== UPLOAD_ERR_NO_FILE) json_response(['error' => 'Product image upload failed.'], 422);
+        if ($uploadError === UPLOAD_ERR_OK) {
+            if ($replaceImages) json_response(['error' => 'Submit either an image upload or the ordered images list, not both.'], 422);
+            $file = $_FILES['imageFile'];
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+            $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+            if ((int)$file['size'] > MAX_UPLOAD_BYTES || !isset($allowed[$mime])) json_response(['error' => 'Product image must be a JPG, PNG, GIF, or WebP under 8MB.'], 422);
+            $folder = PROJECT_UPLOAD_DIR . 'shop/';
+            if (!is_dir($folder) && !mkdir($folder, 0755, true)) json_response(['error' => 'Shop upload directory is unavailable.'], 500);
+            $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+            if (!move_uploaded_file($file['tmp_name'], $folder . $filename)) json_response(['error' => 'Could not save product image.'], 500);
+            $uploadedPath = PROJECT_UPLOAD_URL . 'shop/' . $filename;
+        }
+    }
+    $legacyImage = trim((string)($_POST['image'] ?? ''));
+    if ($replaceImages && $legacyImage !== '') json_response(['error' => 'Submit either image or the ordered images list, not both.'], 422);
+    $primaryReplacement = $uploadedPath ?? ($legacyImage !== '' ? shop_image_path($legacyImage) : null);
+    if (!$replaceImages && $primaryReplacement !== null) {
+        if ($images) {
+            $images[0]['path'] = $primaryReplacement;
+        } else {
+            $images[] = ['path' => $primaryReplacement, 'altText' => '', 'sortOrder' => 1];
+        }
+        $replaceImages = true;
+    }
+    if ($publicationStatus === 'published' && !$images) json_response(['error' => 'Published products require at least one image.'], 422);
+    $imageUrl = $images[0]['path'] ?? '';
+
+    $replaceBadges = array_key_exists('manualBadges', $_POST);
+    $manualBadges = $replaceBadges ? shop_manual_badges($_POST['manualBadges']) : $existingBadges;
+
+    if ($publicationStatus === 'published' && $description === '') json_response(['error' => 'Published products require a full description.'], 422);
+
+    $pdo->beginTransaction();
+    try {
+        $duplicateSku = $pdo->prepare('SELECT id FROM shop_products WHERE sku = ? AND (? IS NULL OR id <> ?) LIMIT 1');
+        $duplicateSku->execute([$sku, $id, $id]);
+        if ($duplicateSku->fetch()) throw new DomainException('That SKU is already in use.');
+        $duplicateSlug = $pdo->prepare('SELECT id FROM shop_products WHERE slug = ? AND (? IS NULL OR id <> ?) LIMIT 1');
+        $duplicateSlug->execute([$slug, $id, $id]);
+        if ($duplicateSlug->fetch()) throw new DomainException('That product slug is already in use.');
+
+        $values = [
+            $sku, $slug, $title, $shortDescription, $description, $category, $productType,
+            $imageUrl, $regular['value'], $sale['value'] ?? null, $stock, $publicationStatus,
+            $storefrontVisible, $showWhenSoldOut, $featured, $sortOrder, $purchaseAction, $externalUrl,
+        ];
+        if ($id !== null) {
+            $stmt = $pdo->prepare('UPDATE shop_products SET sku = ?, slug = ?, title = ?, short_description = ?, description = ?, category = ?, product_type = ?, image_url = ?, price = ?, sale_price = ?, stock = ?, publication_status = ?, storefront_visible = ?, show_when_sold_out = ?, featured = ?, sort_order = ?, purchase_action = ?, external_url = ? WHERE id = ?');
+            $stmt->execute([...$values, $id]);
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO shop_products (sku, slug, title, short_description, description, category, product_type, image_url, price, sale_price, stock, publication_status, storefront_visible, show_when_sold_out, featured, sort_order, purchase_action, external_url, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
+            $stmt->execute($values);
+            $id = (int)$pdo->lastInsertId();
+            $replaceImages = true;
+            $replaceBadges = true;
+        }
+
+        if ($replaceImages) {
+            $deleteImages = $pdo->prepare('DELETE FROM shop_product_images WHERE product_id = ?');
+            $deleteImages->execute([$id]);
+            $insertImage = $pdo->prepare('INSERT INTO shop_product_images (product_id, image_path, alt_text, sort_order) VALUES (?, ?, ?, ?)');
+            foreach ($images as $image) $insertImage->execute([$id, $image['path'], $image['altText'], $image['sortOrder']]);
+        }
+        if ($replaceBadges) {
+            $deleteBadges = $pdo->prepare('DELETE FROM shop_product_badges WHERE product_id = ?');
+            $deleteBadges->execute([$id]);
+            $insertBadge = $pdo->prepare('INSERT INTO shop_product_badges (product_id, label, sort_order) VALUES (?, ?, ?)');
+            foreach ($manualBadges as $badge) $insertBadge->execute([$id, $badge['label'], $badge['sortOrder']]);
+        }
+
+        $pdo->commit();
+        $product = shop_fetch_product($pdo, $id, true);
+        json_response(['id' => $id, 'updated' => $current !== null, 'product' => $product], $current !== null ? 200 : 201);
+    } catch (DomainException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        json_response(['error' => $error->getMessage()], 422);
+    } catch (PDOException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($error->getCode() === '23000') json_response(['error' => 'Product data conflicts with an existing value or constraint.'], 422);
+        throw $error;
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 }
 
 if ($action === 'delete-product') {
