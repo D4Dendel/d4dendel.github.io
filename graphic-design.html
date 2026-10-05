@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261004.f1">
+    <link rel="stylesheet" href="css/style.css?v=20261005.c2">
 </head>
 <body class="shop-page">
     <header class="header">
@@ -17,9 +17,6 @@
                 <img src="img/icon.png" alt="Dyndel Pino logo">
                 <div class="brand">Dyndel <span>Pino</span></div>
             </div>
-            <button class="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
-                <span></span><span></span><span></span>
-            </button>
             <nav class="nav" aria-label="Main navigation">
                 <ul>
                     <li><a href="index.html">Home</a></li>
@@ -31,21 +28,25 @@
                     <li><a href="index.html#contact">Contact</a></li>
                 </ul>
             </nav>
+            <button class="shop-header-cart" type="button" data-open-cart aria-controls="shop-cart-panel" aria-expanded="false">Cart <span class="shop-header-cart-count" data-cart-count hidden>0</span></button>
+            <button class="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
         </div>
     </header>
 
-    <main class="page-shell category-page">
-        <section class="category-hero shop-hero">
-            <p class="eyebrow">Small edition shop</p>
-            <h1>Artwork made to leave the screen.</h1>
-            <p>Browse signed prints and studio pieces, then build your order in the cart.</p>
-        </section>
+    <section class="shop-banner" aria-labelledby="shop-title">
+        <div class="shop-banner-copy">
+            <p class="eyebrow">Dyndel artist shop</p>
+            <h1 id="shop-title">Art for your everyday.</h1>
+        </div>
+        <div class="shop-banner-art" data-shop-banner-art aria-hidden="true"></div>
+    </section>
 
+    <main class="page-shell category-page">
         <section class="shop-layout" aria-label="Shop catalog">
-            <div class="shop-grid" data-shop-products></div>
-            <aside class="shop-cart-column" aria-label="Shopping cart">
-                <button class="btn btn-primary shop-cart-button" type="button" data-open-cart>Cart <span data-cart-count>0</span></button>
-                <div class="shop-cart" data-cart-panel hidden>
+            <aside class="shop-cart-column" data-cart-region aria-label="Shopping cart" hidden>
+                <div class="shop-cart" id="shop-cart-panel" data-cart-panel hidden>
                 <div class="shop-cart-header"><h2>Your cart</h2><button class="icon-button" type="button" data-close-cart aria-label="Close cart">&times;</button></div>
                 <div data-cart-items></div>
                 <div class="shop-cart-total"><span>Total</span><strong data-cart-total>$0.00</strong></div>
@@ -59,6 +60,7 @@
                 </form>
                 </div>
             </aside>
+            <div class="shop-catalog" data-shop-products aria-live="polite"></div>
         </section>
 
     </main>
@@ -67,6 +69,6 @@
         <p>© 2026 Dyndel Pino</p>
     </footer>
 
-    <script src="script.js?v=20261004.d"></script>
+    <script src="script.js?v=20261005.c2"></script>
 </body>
 </html>

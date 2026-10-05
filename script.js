@@ -2671,6 +2671,7 @@ contactForm?.addEventListener('submit', async (event) => {
 
 const shopProductsTarget = document.querySelector('[data-shop-products]');
 const cartPanel = document.querySelector('[data-cart-panel]');
+const cartRegion = document.querySelector('[data-cart-region]');
 const cartItemsTarget = document.querySelector('[data-cart-items]');
 const cartTotalTarget = document.querySelector('[data-cart-total]');
 const cartCountTargets = document.querySelectorAll('[data-cart-count]');
@@ -2682,6 +2683,7 @@ let cart = getStoredData(CART_KEY, []);
 
 const saveCart = () => saveData(CART_KEY, cart);
 const money = (value) => `$${Number(value).toFixed(2)}`;
+const shopPrice = (value) => `$${String(value)}`;
 
 const renderCart = () => {
   const detailedCart = cart.map((item) => ({
@@ -2689,28 +2691,170 @@ const renderCart = () => {
     product: shopProducts.find((product) => Number(product.id) === Number(item.id))
   })).filter((item) => item.product);
   const count = detailedCart.reduce((sum, item) => sum + item.quantity, 0);
-  const total = detailedCart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
-  cartCountTargets.forEach((target) => { target.textContent = count; });
+  const total = detailedCart.reduce((sum, item) => sum + Number(item.product.currentPrice ?? item.product.price) * item.quantity, 0);
+  cartCountTargets.forEach((target) => {
+    target.textContent = count;
+    target.hidden = count === 0;
+  });
+  const cartButton = document.querySelector('[data-open-cart]');
+  if (cartButton) cartButton.setAttribute('aria-label', count ? `Cart, ${count} item${count === 1 ? '' : 's'}` : 'Cart, empty');
   if (cartTotalTarget) cartTotalTarget.textContent = money(total);
   if (cartItemsTarget) {
-    cartItemsTarget.innerHTML = detailedCart.length ? detailedCart.map(({ product, quantity }) => `
-      <div class="shop-cart-item">
-        <img src="${product.image}" alt="${product.title}">
-        <div><strong>${product.title}</strong><span>${money(product.price)} &times; ${quantity}</span></div>
-        <button class="icon-button" type="button" data-remove-cart="${product.id}" aria-label="Remove ${product.title}">&times;</button>
-      </div>
-    `).join('') : '<p class="shop-empty-cart">Your cart is empty.</p>';
+    cartItemsTarget.replaceChildren();
+    if (!detailedCart.length) {
+      const empty = document.createElement('p');
+      empty.className = 'shop-empty-cart';
+      empty.textContent = 'Your cart is empty.';
+      cartItemsTarget.append(empty);
+    } else {
+      detailedCart.forEach(({ product, quantity }) => {
+        const item = document.createElement('div');
+        item.className = 'shop-cart-item';
+        const image = document.createElement('img');
+        image.src = product.image;
+        image.alt = '';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = product.title;
+        const price = document.createElement('span');
+        price.textContent = `${shopPrice(product.currentPrice ?? product.price)} × ${quantity}`;
+        copy.append(title, price);
+        const remove = document.createElement('button');
+        remove.className = 'icon-button';
+        remove.type = 'button';
+        remove.dataset.removeCart = String(product.id);
+        remove.setAttribute('aria-label', `Remove ${product.title}`);
+        remove.textContent = '×';
+        item.append(image, copy, remove);
+        cartItemsTarget.append(item);
+      });
+    }
   }
+};
+
+const shopProductHref = (product) => {
+  if (product.purchaseAction === 'external' && product.externalUrl) return product.externalUrl;
+  if (product.purchaseAction === 'inquiry') return 'index.html#contact';
+  return `graphic-design.html?product=${encodeURIComponent(product.slug)}`;
+};
+
+const publicProductBadges = (product) => (product.badges || [])
+  .filter((badge) => badge.key === 'sale' || badge.key === 'sold-out' || badge.source === 'manual')
+  .slice(0, 3);
+
+const createShopProductCard = (product) => {
+  const card = document.createElement('article');
+  card.className = 'shop-product';
+  card.dataset.productId = String(product.id);
+  if (!product.available) card.classList.add('is-sold-out');
+  if ((product.images || []).length > 1) card.classList.add('has-hover-image');
+
+  const link = document.createElement('a');
+  link.className = 'shop-product-link';
+  link.href = shopProductHref(product);
+  link.dataset.productSlug = product.slug;
+  link.dataset.purchaseAction = product.purchaseAction;
+  link.setAttribute('aria-label', product.purchaseAction === 'external'
+    ? `${product.title} — view on external site`
+    : product.purchaseAction === 'inquiry'
+      ? `Ask about ${product.title}`
+      : `View ${product.title}`);
+
+  const media = document.createElement('div');
+  media.className = 'shop-product-media';
+  const primaryData = product.images?.[0] || { path: product.image, altText: '' };
+  const primary = document.createElement('img');
+  primary.className = 'shop-product-image is-primary';
+  primary.src = primaryData.path || product.image;
+  primary.alt = primaryData.altText || product.title;
+  primary.loading = 'lazy';
+  primary.decoding = 'async';
+  media.append(primary);
+  if (product.images?.[1]) {
+    const secondary = document.createElement('img');
+    secondary.className = 'shop-product-image is-secondary';
+    secondary.src = product.images[1].path;
+    secondary.alt = '';
+    secondary.loading = 'lazy';
+    secondary.decoding = 'async';
+    secondary.setAttribute('aria-hidden', 'true');
+    secondary.addEventListener('error', () => card.classList.remove('has-hover-image'), { once: true });
+    media.append(secondary);
+  }
+  const badges = publicProductBadges(product);
+  if (badges.length) {
+    const badgeList = document.createElement('div');
+    badgeList.className = 'shop-product-badges';
+    badges.forEach((badge) => {
+      const label = document.createElement('span');
+      label.className = `shop-product-badge is-${badge.key}`;
+      label.textContent = badge.label;
+      badgeList.append(label);
+    });
+    media.append(badgeList);
+  }
+
+  const copy = document.createElement('div');
+  copy.className = 'shop-product-copy';
+  const title = document.createElement('h3');
+  title.textContent = product.title;
+  const pricing = document.createElement('p');
+  pricing.className = 'shop-product-price';
+  if (product.onSale) {
+    const currentLabel = document.createElement('span');
+    currentLabel.className = 'visually-hidden';
+    currentLabel.textContent = 'Sale price ';
+    const current = document.createElement('strong');
+    current.textContent = shopPrice(product.currentPrice);
+    const regular = document.createElement('del');
+    const regularLabel = document.createElement('span');
+    regularLabel.className = 'visually-hidden';
+    regularLabel.textContent = 'Regular price ';
+    regular.append(regularLabel, document.createTextNode(shopPrice(product.regularPrice)));
+    pricing.append(currentLabel, current, regular);
+  } else {
+    pricing.textContent = shopPrice(product.currentPrice ?? product.price);
+  }
+  copy.append(title, pricing);
+  link.append(media, copy);
+  card.append(link);
+  return card;
+};
+
+const renderShopBannerArt = () => {
+  const target = document.querySelector('[data-shop-banner-art]');
+  if (!target) return;
+  target.replaceChildren();
+  shopProducts.slice(0, 3).forEach((product, index) => {
+    const image = document.createElement('img');
+    image.src = product.images?.[0]?.path || product.image;
+    image.alt = '';
+    image.loading = index === 0 ? 'eager' : 'lazy';
+    target.append(image);
+  });
 };
 
 const renderShopProducts = () => {
   if (!shopProductsTarget) return;
-  shopProductsTarget.innerHTML = shopProducts.map((product) => `
-    <article class="shop-product">
-      <img src="${product.image}" alt="${product.title}" loading="lazy">
-      <div class="shop-product-copy"><p class="eyebrow">Limited edition</p><h2>${product.title}</h2><p>${product.description}</p><div class="shop-product-footer"><strong>${money(product.price)}</strong><button class="btn btn-primary" type="button" data-add-cart="${product.id}" ${Number(product.stock) < 1 ? 'disabled' : ''}>${Number(product.stock) < 1 ? 'Sold out' : 'Add to cart'}</button></div></div>
-    </article>
-  `).join('');
+  shopProductsTarget.replaceChildren();
+  const collections = new Map();
+  shopProducts.forEach((product) => {
+    const category = typeof product.category === 'string' && product.category.trim() ? product.category.trim() : 'More from the studio';
+    if (!collections.has(category)) collections.set(category, []);
+    collections.get(category).push(product);
+  });
+  collections.forEach((products, category) => {
+    const section = document.createElement('section');
+    section.className = 'shop-collection';
+    const heading = document.createElement('h2');
+    heading.textContent = category;
+    const grid = document.createElement('div');
+    grid.className = 'shop-grid';
+    grid.append(...products.map(createShopProductCard));
+    section.append(heading, grid);
+    shopProductsTarget.append(section);
+  });
+  renderShopBannerArt();
 };
 
 if (shopProductsTarget) {
@@ -2718,64 +2862,28 @@ if (shopProductsTarget) {
     shopProducts = data.products;
     renderShopProducts();
     renderCart();
-  }).catch((error) => { shopProductsTarget.innerHTML = `<p class="shop-form-message">${error.message}</p>`; });
+  }).catch((error) => {
+    const message = document.createElement('p');
+    message.className = 'shop-form-message';
+    message.textContent = error.message;
+    shopProductsTarget.replaceChildren(message);
+  });
   document.addEventListener('click', (event) => {
-    const addButton = event.target.closest('[data-add-cart]');
     const removeButton = event.target.closest('[data-remove-cart]');
-    if (addButton) {
-      const id = Number(addButton.dataset.addCart);
-      const existing = cart.find((item) => Number(item.id) === id);
-      if (existing) existing.quantity += 1;
-      else cart.push({ id, quantity: 1 });
-      saveCart();
-      renderCart();
-      if (cartPanel) cartPanel.hidden = false;
-    }
     if (removeButton) {
       cart = cart.filter((item) => Number(item.id) !== Number(removeButton.dataset.removeCart));
       saveCart();
       renderCart();
     }
   });
-  document.querySelector('[data-open-cart]')?.addEventListener('click', () => { cartPanel.hidden = false; });
-  document.querySelector('[data-close-cart]')?.addEventListener('click', () => { cartPanel.hidden = true; });
-  const mobileCartButton = document.querySelector('[data-open-cart]');
-  if (mobileCartButton && window.matchMedia('(max-width: 600px)').matches) {
-    const savedPosition = getStoredData('dyndelMobileCartPosition', null);
-    if (savedPosition) {
-      mobileCartButton.style.left = `${savedPosition.left}px`;
-      mobileCartButton.style.top = `${savedPosition.top}px`;
-      mobileCartButton.style.right = 'auto';
-      mobileCartButton.style.bottom = 'auto';
-    }
-    let dragState = null;
-    mobileCartButton.addEventListener('pointerdown', (event) => {
-      const rect = mobileCartButton.getBoundingClientRect();
-      dragState = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false };
-      mobileCartButton.setPointerCapture(event.pointerId);
-    });
-    mobileCartButton.addEventListener('pointermove', (event) => {
-      if (!dragState) return;
-      const deltaX = event.clientX - dragState.startX;
-      const deltaY = event.clientY - dragState.startY;
-      if (Math.hypot(deltaX, deltaY) > 5) dragState.moved = true;
-      if (!dragState.moved) return;
-      const left = Math.min(Math.max(8, dragState.left + deltaX), window.innerWidth - mobileCartButton.offsetWidth - 8);
-      const top = Math.min(Math.max(8, dragState.top + deltaY), window.innerHeight - mobileCartButton.offsetHeight - 8);
-      mobileCartButton.style.left = `${left}px`;
-      mobileCartButton.style.top = `${top}px`;
-      mobileCartButton.style.right = 'auto';
-      mobileCartButton.style.bottom = 'auto';
-    });
-    mobileCartButton.addEventListener('pointerup', () => {
-      if (dragState?.moved) {
-        const rect = mobileCartButton.getBoundingClientRect();
-        saveData('dyndelMobileCartPosition', { left: rect.left, top: rect.top });
-      }
-      dragState = null;
-    });
-    mobileCartButton.addEventListener('pointercancel', () => { dragState = null; });
-  }
+  const setCartOpen = (open) => {
+    if (!cartPanel || !cartRegion) return;
+    cartRegion.hidden = !open;
+    cartPanel.hidden = !open;
+    document.querySelector('[data-open-cart]')?.setAttribute('aria-expanded', String(open));
+  };
+  document.querySelector('[data-open-cart]')?.addEventListener('click', () => setCartOpen(true));
+  document.querySelector('[data-close-cart]')?.addEventListener('click', () => setCartOpen(false));
   checkoutForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!cart.length) { checkoutMessage.textContent = 'Add an item before checking out.'; return; }

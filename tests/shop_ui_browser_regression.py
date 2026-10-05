@@ -309,6 +309,9 @@ status, initial_admin = api_request("admin-products", session_id=session_id)
 expect(status == 200, "Could not capture initial Admin product state")
 initial_live = {product["id"]: product for product in initial_admin["products"]}
 expect(set(initial_live) == {1, 2, 3}, "Expected exactly the three live products before browser testing")
+status, initial_shop_response = api_request("shop")
+expect(status == 200 and len(initial_shop_response.get("products", [])) == 3, "Could not capture the initial public Shop")
+initial_public_products = initial_shop_response["products"]
 
 try:
     chrome, websocket_url = start_chrome(profile)
@@ -322,44 +325,126 @@ try:
     cdp.navigate(BASE + "graphic-design.html")
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
     cdp.wait_for("document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3", 15)
-    cdp.wait_for("[...document.querySelectorAll('.shop-product img')].every(image => image.complete && image.naturalWidth > 0)", 15)
+    cdp.wait_for("[...document.querySelectorAll('.shop-product-image.is-primary')].every(image => image.complete && image.naturalWidth > 0)", 15)
     desktop_cards = cdp.evaluate("""
         [...document.querySelectorAll('.shop-product')].map(card => ({
-            image: card.querySelector('img')?.getAttribute('src') || '',
-            imageLoaded: Boolean(card.querySelector('img')?.complete && card.querySelector('img')?.naturalWidth),
-            title: card.querySelector('h2')?.textContent.trim() || '',
-            description: card.querySelector('.shop-product-copy > p:not(.eyebrow)')?.textContent.trim() || '',
-            price: card.querySelector('.shop-product-footer strong')?.textContent.trim() || '',
-            action: card.querySelector('[data-add-cart]')?.textContent.trim() || '',
-            disabled: Boolean(card.querySelector('[data-add-cart]')?.disabled)
+            image: card.querySelector('.shop-product-image.is-primary')?.getAttribute('src') || '',
+            imageLoaded: Boolean(card.querySelector('.shop-product-image.is-primary')?.complete && card.querySelector('.shop-product-image.is-primary')?.naturalWidth),
+            title: card.querySelector('h3')?.textContent.trim() || '',
+            price: card.querySelector('.shop-product-price')?.textContent.trim() || '',
+            href: card.querySelector('.shop-product-link')?.getAttribute('href') || '',
+            description: Boolean(card.querySelector('.shop-product-copy > p:not(.shop-product-price)')),
+            addButtons: card.querySelectorAll('[data-add-cart]').length
         }))
     """)
     expect(len(desktop_cards) == 3, "Desktop Shop did not render three cards")
-    expect(all(card["image"] and card["imageLoaded"] and card["title"] and card["description"] and card["price"] for card in desktop_cards), "A desktop product card was missing visible content")
-    expect(all(card["action"] == "Add to cart" and not card["disabled"] for card in desktop_cards), "Desktop stock state/Add to Cart rendering changed")
-    checks += 3
+    expect(all(card["image"] and card["imageLoaded"] and card["title"] and card["price"] and card["href"] for card in desktop_cards), "A storefront card was missing artwork, title, price, or link")
+    expect(all(not card["description"] and card["addButtons"] == 0 for card in desktop_cards), "A storefront card still exposed description or Add to Cart")
+    storefront_shell = cdp.evaluate("""
+        (() => {
+            const banner=document.querySelector('.shop-banner');
+            const header=document.querySelector('.header');
+            const card=document.querySelector('.shop-product');
+            const link=card.querySelector('.shop-product-link');
+            const title=card.querySelector('h3').getBoundingClientRect();
+            const price=card.querySelector('.shop-product-price').getBoundingClientRect();
+            const cardRect=card.getBoundingClientRect();
+            const linkRect=link.getBoundingClientRect();
+            const cardStyle=getComputedStyle(card);
+            const bannerRect=banner.getBoundingClientRect();
+            return {
+                bannerHeight:bannerRect.height,
+                bannerLeft:bannerRect.left,
+                bannerRight:bannerRect.right,
+                viewportWidth:document.documentElement.clientWidth,
+                bannerHeaderGap:bannerRect.top-header.getBoundingClientRect().bottom,
+                bannerImages:document.querySelectorAll('[data-shop-banner-art] img').length,
+                headings:[...document.querySelectorAll('.shop-collection > h2')].map(item => item.textContent),
+                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                titlePriceGap:price.top-title.bottom,
+                cardRadius:parseFloat(cardStyle.borderTopLeftRadius),
+                cardSurface:cardStyle.backgroundColor,
+                linkCoversCard:Math.abs(linkRect.width-cardRect.width) <= 2 && Math.abs(linkRect.height-cardRect.height) <= 2,
+                cartInHeader:Boolean(document.querySelector('.header [data-open-cart]')),
+                cartWidth:document.querySelector('[data-open-cart]').getBoundingClientRect().width,
+                emptyCountHidden:document.querySelector('[data-cart-count]').hidden,
+                overflow:document.documentElement.scrollWidth > innerWidth
+            };
+        })()
+    """)
+    expect(storefront_shell["bannerHeight"] <= 300 and storefront_shell["bannerImages"] == 3 and abs(storefront_shell["bannerLeft"]) < 1 and abs(storefront_shell["bannerRight"] - storefront_shell["viewportWidth"]) < 1 and abs(storefront_shell["bannerHeaderGap"]) < 1, "Desktop Shop banner was not full-bleed, flush to the header, short, and artwork-led: " + json.dumps(storefront_shell))
+    expect(storefront_shell["headings"] == ["Art Prints"] and storefront_shell["columns"] == 3 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
+    expect(0 <= storefront_shell["titlePriceGap"] <= 8 and storefront_shell["cardRadius"] >= 10 and storefront_shell["cardSurface"] != "rgba(0, 0, 0, 0)" and storefront_shell["linkCoversCard"], "Desktop product cards were not compact, rounded, surfaced, and fully linked")
+    expect(storefront_shell["cartInHeader"] and storefront_shell["cartWidth"] < 100 and storefront_shell["emptyCountHidden"], "Desktop cart access was not compactly integrated with the header")
+    status, theme_response = api_request("theme")
+    applied_accent = cdp.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim().toLowerCase()")
+    expect(status == 200 and applied_accent == theme_response["theme"]["accentColor"].lower(), "Public Shop did not apply the published theme")
+    checks += 8
 
-    first_price = float(desktop_cards[0]["price"].replace("$", ""))
-    cdp.evaluate("document.querySelector('[data-add-cart]').click(); document.querySelector('[data-add-cart]').click()")
+    first_product = initial_public_products[0]
+    first_price = float(first_product["currentPrice"])
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:2}}])); location.reload()")
     cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '2'")
-    cart_state = cdp.evaluate("({count: document.querySelector('[data-cart-count]').textContent, total: document.querySelector('[data-cart-total]').textContent, item: document.querySelector('.shop-cart-item span').textContent})")
-    expect(cart_state["total"] == f"${first_price * 2:.2f}" and "× 2" in cart_state["item"], "Desktop cart quantity or total changed")
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("!document.querySelector('[data-cart-region]').hidden && !document.querySelector('[data-cart-panel]').hidden")
+    cart_state = cdp.evaluate("""
+        (() => {
+            const panel=document.querySelector('[data-cart-panel]').getBoundingClientRect();
+            const catalog=document.querySelector('.shop-catalog').getBoundingClientRect();
+            const count=document.querySelector('[data-cart-count]');
+            return {count:count.textContent, countHidden:count.hidden, total:document.querySelector('[data-cart-total]').textContent, item:document.querySelector('.shop-cart-item span').textContent, expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'), panelBeforeCatalog:panel.bottom <= catalog.top};
+        })()
+    """)
+    expect(cart_state["total"] == f"${first_price * 2:.2f}" and "× 2" in cart_state["item"] and cart_state["count"] == "2" and not cart_state["countHidden"], "Desktop cart quantity, count, or total changed")
+    expect(cart_state["expanded"] == "true" and cart_state["panelBeforeCatalog"], "Opened cart did not remain in document flow above the product cards")
     cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '0'")
-    expect(cdp.evaluate("document.querySelector('[data-cart-total]').textContent") == "$0.00", "Desktop cart removal did not reset the total")
-    checks += 2
+    expect(cdp.evaluate("document.querySelector('[data-cart-total]').textContent === '$0.00' && document.querySelector('[data-cart-count]').hidden") is True, "Desktop cart removal did not reset the total and hide the empty count")
+    cdp.evaluate("document.querySelector('[data-close-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden")
+    checks += 3
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
     cdp.navigate(BASE + "graphic-design.html", "document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3")
-    mobile_state = cdp.evaluate("({cards: document.querySelectorAll('.shop-product').length, cartDisplay: getComputedStyle(document.querySelector('[data-open-cart]')).display})")
-    expect(mobile_state["cards"] == 3 and mobile_state["cartDisplay"] != "none", "Mobile Shop catalog/cart control did not render")
-    cdp.evaluate("document.querySelector('[data-add-cart]').click()")
-    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '1'")
-    cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
-    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '0'")
-    checks += 2
+    mobile_state = cdp.evaluate("""
+        (() => {
+            const banner=document.querySelector('.shop-banner').getBoundingClientRect();
+            const header=document.querySelector('.header').getBoundingClientRect();
+            const card=document.querySelector('.shop-product');
+            const cardRect=card.getBoundingClientRect();
+            const title=card.querySelector('h3').getBoundingClientRect();
+            const price=card.querySelector('.shop-product-price').getBoundingClientRect();
+            const cart=document.querySelector('[data-open-cart]');
+            const cartRect=cart.getBoundingClientRect();
+            const mascot=document.querySelector('.contact-mascot')?.getBoundingClientRect();
+            const overlaps=(a,b) => Boolean(a && b && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top);
+            return {
+                cards:document.querySelectorAll('.shop-product').length,
+                cartDisplay:getComputedStyle(cart).display,
+                cartInHeader:Boolean(cart.closest('.header')),
+                cartWidth:cartRect.width,
+                cartOverlap:overlaps(cartRect,cardRect) || overlaps(cartRect,mascot),
+                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                bannerHeight:banner.height,
+                bannerEdges:Math.abs(banner.left) < 1 && Math.abs(banner.right-innerWidth) < 1,
+                bannerHeaderGap:banner.top-header.bottom,
+                titlePriceGap:price.top-title.bottom,
+                cardRadius:parseFloat(getComputedStyle(card).borderTopLeftRadius),
+                addButtons:document.querySelectorAll('[data-add-cart]').length,
+                overflow:document.documentElement.scrollWidth > innerWidth,
+                navToggle:getComputedStyle(document.querySelector('.menu-toggle')).display
+            };
+        })()
+    """)
+    expect(mobile_state["cards"] == 3 and mobile_state["cartDisplay"] != "none" and mobile_state["cartInHeader"] and mobile_state["cartWidth"] < 100 and not mobile_state["cartOverlap"] and mobile_state["navToggle"] != "none", "Mobile Shop catalog, compact cart access, or navigation did not render without overlap")
+    expect(mobile_state["columns"] == 2 and mobile_state["bannerHeight"] <= 220 and mobile_state["bannerEdges"] and abs(mobile_state["bannerHeaderGap"]) < 1 and mobile_state["addButtons"] == 0 and not mobile_state["overflow"], "Mobile full-bleed banner/grid layout regressed")
+    expect(0 <= mobile_state["titlePriceGap"] <= 8 and mobile_state["cardRadius"] >= 10, "Mobile card rounding or title/price spacing regressed")
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    expect(cdp.evaluate("document.querySelector('.nav').classList.contains('open')") is True, "Mobile navigation toggle did not open")
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    checks += 4
 
     primary_url = BASE + "img/illustration/balaam.jpg"
     hover_url = BASE + "img/graphic_design/Moon%20Silhoutte.jpg"
@@ -584,16 +669,122 @@ try:
     ], "Saved gallery did not reload exactly")
     capture_screenshot(cdp, "shop-admin-b4-desktop.png")
 
+    storefront_fields = {
+        "sku": "TEST-UI-STOREFRONT-" + token.upper(),
+        "slug": "test-ui-storefront-" + token,
+        "title": "A Long Limited Studio Print for Storefront Regression",
+        "shortDescription": "Disposable storefront fixture.",
+        "description": "Disposable storefront fixture for sold-out and external-link behavior.",
+        "category": "",
+        "productType": "physical",
+        "price": "10.00",
+        "salePrice": "8.00",
+        "stock": "0",
+        "publicationStatus": "published",
+        "storefrontVisible": "1",
+        "showWhenSoldOut": "1",
+        "featured": "1",
+        "sortOrder": "999",
+        "purchaseAction": "external",
+        "externalUrl": "https://example.com/storefront-regression",
+        "images": json.dumps([
+            {"path": primary_url, "altText": "Storefront primary artwork", "sortOrder": 1},
+            {"path": hover_url, "altText": "Storefront hover artwork", "sortOrder": 2},
+        ]),
+        "manualBadges": json.dumps([{"label": "Limited", "sortOrder": 1}]),
+    }
+    status, storefront_created = api_request("product", "POST", storefront_fields, session_id)
+    expect(status == 201, "Could not create disposable storefront fixture")
+    storefront_id = storefront_created["id"]
+    fixture_ids.append(storefront_id)
+
     cdp.navigate(BASE + "graphic-design.html")
-    cdp.wait_for(f"[...document.querySelectorAll('.shop-product h2')].some(title => title.textContent === {js_string(v2_fields['title'])})", 15)
-    public_primary = cdp.evaluate(f"""
+    cdp.wait_for("document.querySelectorAll('.shop-product').length === 5", 15)
+    storefront_state = cdp.evaluate(f"""
         (() => {{
-            const card=[...document.querySelectorAll('.shop-product')].find(item => item.querySelector('h2')?.textContent === {js_string(v2_fields['title'])});
-            return card?.querySelector('img')?.getAttribute('src') || '';
+            const inquiry=document.querySelector('[data-product-id="{v2_id}"]');
+            const external=document.querySelector('[data-product-id="{storefront_id}"]');
+            const externalBadges=[...external.querySelectorAll('.shop-product-badge')].map(item => item.textContent);
+            return {{
+                cards:document.querySelectorAll('.shop-product').length,
+                headings:[...document.querySelectorAll('.shop-collection > h2')].map(item => item.textContent),
+                inquiryHref:inquiry.querySelector('.shop-product-link').getAttribute('href'),
+                inquiryPrimary:inquiry.querySelector('.is-primary').getAttribute('src'),
+                inquiryAlt:inquiry.querySelector('.is-primary').alt,
+                inquiryImages:inquiry.querySelectorAll('.shop-product-image').length,
+                inquiryPrice:inquiry.querySelector('.shop-product-price').textContent.replace(/\s+/g, ' ').trim(),
+                inquiryBadges:[...inquiry.querySelectorAll('.shop-product-badge')].map(item => item.textContent),
+                externalHref:external.querySelector('.shop-product-link').getAttribute('href'),
+                externalImages:external.querySelectorAll('.shop-product-image').length,
+                externalBadges,
+                badgesInsideImage:[...external.querySelectorAll('.shop-product-badge')].every(item => item.closest('.shop-product-media')),
+                soldOut:external.classList.contains('is-sold-out'),
+                addButtons:document.querySelectorAll('[data-add-cart]').length,
+                internalHook:document.querySelector('[data-product-id="1"] .shop-product-link').getAttribute('href'),
+                overflow:document.documentElement.scrollWidth > innerWidth
+            }};
         }})()
     """)
-    expect(public_primary == uploaded_path, "Public Shop did not use the reordered primary image")
-    checks += 2
+    expect(storefront_state["cards"] == 5 and storefront_state["headings"] == ["Art Prints", "Regression", "More from the studio"], "Category and uncategorized storefront sections were incorrect")
+    expect(storefront_state["inquiryHref"] == "index.html#contact" and storefront_state["externalHref"] == storefront_fields["externalUrl"] and storefront_state["internalHook"].startswith("graphic-design.html?product="), "Product action links were unsafe or incorrect")
+    expect(storefront_state["inquiryPrimary"] == uploaded_path and storefront_state["inquiryAlt"] == "Uploaded primary alt text" and storefront_state["inquiryImages"] == 2, "Ordered gallery or primary alt text was not used by the storefront")
+    expect("$18.00" in storefront_state["inquiryPrice"] and "$22.00" in storefront_state["inquiryPrice"] and storefront_state["inquiryBadges"] == ["Sale", "New"], "Sale price or minimal inquiry badges were incorrect")
+    expect(storefront_state["externalImages"] == 2 and storefront_state["externalBadges"] == ["Sale", "Sold Out", "Limited"] and storefront_state["badgesInsideImage"] and storefront_state["soldOut"], "Sold-out, hover-image, or badge presentation was incorrect")
+    expect(storefront_state["addButtons"] == 0 and not storefront_state["overflow"], "Storefront retained transactional buttons or overflowed")
+
+    cdp.call("Page.bringToFront")
+    focus_state = cdp.evaluate(f"""
+        (async () => {{
+            const card=document.querySelector('[data-product-id="{storefront_id}"]');
+            const badge=card.querySelector('.shop-product-badge').getBoundingClientRect();
+            const link=card.querySelector('.shop-product-link');
+            link.focus({{preventScroll:true}});
+            await new Promise(resolve => setTimeout(resolve, 700));
+            const badgeAfter=card.querySelector('.shop-product-badge').getBoundingClientRect();
+            return {{
+                secondaryOpacity:Number(getComputedStyle(card.querySelector('.is-secondary')).opacity),
+                primaryOpacity:Number(getComputedStyle(card.querySelector('.is-primary')).opacity),
+                badgeStationary:badge.x === badgeAfter.x && badge.y === badgeAfter.y,
+                outline:getComputedStyle(link).outlineStyle,
+                active:document.activeElement === link,
+                matchesFocus:link.matches(':focus')
+            }};
+        }})()
+    """, await_promise=True)
+    expect(focus_state["active"] and focus_state["matchesFocus"] and focus_state["secondaryOpacity"] >= 0.8 and focus_state["primaryOpacity"] < 0.02 and focus_state["badgeStationary"] and focus_state["outline"] != "none", "Keyboard focus did not expose the hover image with a stable badge and visible focus: " + json.dumps(focus_state))
+    cdp.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
+    expect(cdp.evaluate(f"getComputedStyle(document.querySelector('[data-product-id=\"{storefront_id}\"] .is-secondary')).transitionDuration") == "0s", "Reduced-motion preference did not disable the image transition")
+    cdp.call("Emulation.setEmulatedMedia", {"features": []})
+    capture_screenshot(cdp, "shop-c-desktop.png")
+    checks += 9
+
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
+    })
+    mobile_storefront = cdp.evaluate(f"""
+        (async () => {{
+            const card=document.querySelector('[data-product-id="{storefront_id}"]');
+            card.querySelector('.shop-product-link').blur();
+            await new Promise(resolve => setTimeout(resolve, 700));
+            return {{
+                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                bannerHeight:document.querySelector('.shop-banner').getBoundingClientRect().height,
+                primaryOpacity:Number(getComputedStyle(card.querySelector('.is-primary')).opacity),
+                overflow:document.documentElement.scrollWidth > innerWidth,
+                longTitleHeight:card.querySelector('h3').getBoundingClientRect().height
+            }};
+        }})()
+    """, await_promise=True)
+    expect(mobile_storefront["columns"] == 2 and mobile_storefront["bannerHeight"] <= 220 and mobile_storefront["primaryOpacity"] > 0.8 and not mobile_storefront["overflow"] and mobile_storefront["longTitleHeight"] > 30, "Mobile storefront banner, grid, title, or primary image regressed: " + json.dumps(mobile_storefront))
+    capture_screenshot(cdp, "shop-c-mobile.png")
+    checks += 1
+
+    status, _ = api_request("delete-product", "POST", {"id": storefront_id}, session_id)
+    expect(status == 200, "Could not remove disposable storefront fixture")
+    fixture_ids.remove(storefront_id)
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
+    })
 
     cdp.navigate(BASE + "admin.html")
     cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
@@ -734,6 +925,32 @@ try:
     """)
     expect(settings_state == {"fieldCount": 4, "savedInstagram": "https://instagram.com/dyndel-browser-test"}, "Settings social-link form did not save in the disposable browser profile")
     checks += 8
+
+    illustration_count = len([project for project in projects["projects"] if project["category"] == "Illustration"])
+    cdp.navigate(BASE + "illustration.html")
+    cdp.wait_for(f"document.querySelectorAll('[data-category-projects] .gallery-card').length === {illustration_count}", 15)
+    expect(cdp.evaluate("document.querySelectorAll('[data-category-projects] .gallery-card').length") == illustration_count, "Public Projects gallery did not match its API")
+
+    status, public_content = api_request("content")
+    expect(status == 200 and public_content.get("entries"), "No published Story was available for regression")
+    published_story = public_content["entries"][0]
+    cdp.navigate(BASE + "stories.php")
+    cdp.wait_for("document.querySelector('[data-stories-results]').getAttribute('aria-busy') === 'false'", 15)
+    expect(cdp.evaluate("document.querySelectorAll('[data-stories-list] .story-card').length") == len(public_content["entries"]), "Stories archive did not render published entries")
+    cdp.navigate(BASE + "story.php?slug=" + urllib.parse.quote(published_story["slug"]))
+    expect(cdp.evaluate("document.querySelector('.story-article h1')?.textContent || ''") == published_story["title"], "Story reader did not render the selected published story")
+
+    cdp.navigate(BASE + "index.html#contact")
+    cdp.wait_for("location.hash === '#contact' && document.querySelector('#contact') && document.querySelectorAll('.home-gallery .gallery-card').length > 0", 15)
+    contact_state = cdp.evaluate("""
+        (() => {
+            const contact=document.querySelector('#contact').getBoundingClientRect();
+            const header=document.querySelector('.header').getBoundingClientRect();
+            return {hash:location.hash, contactVisible:contact.top >= header.height - 6 && contact.top < innerHeight, projects:document.querySelectorAll('.home-gallery .gallery-card').length};
+        })()
+    """)
+    expect(contact_state["hash"] == "#contact" and contact_state["contactVisible"] and contact_state["projects"] > 0, "Contact deep link or homepage project gallery regressed")
+    checks += 5
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
