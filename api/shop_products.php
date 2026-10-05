@@ -184,16 +184,113 @@ function shop_images(mixed $raw): array
             json_response(['error' => 'Each image must contain path, altText, and sortOrder.', 'image' => $index], 422);
         }
         $sortOrder = shop_positive_integer($item['sortOrder'], 'Image sort order');
-        $images[] = [
+        $image = [
             'path' => shop_image_path($item['path']),
             'altText' => shop_text($item['altText'], 'Image alt text', 255),
             'sortOrder' => $sortOrder,
         ];
+        if (array_key_exists('id', $item) && $item['id'] !== null && $item['id'] !== '') {
+            $image['id'] = shop_positive_integer($item['id'], 'Image ID');
+        }
+        $images[] = $image;
         $positions[] = $sortOrder;
     }
     if ($positions) shop_validate_ordering($positions, 'Image ordering');
     usort($images, static fn(array $left, array $right): int => $left['sortOrder'] <=> $right['sortOrder']);
     return $images;
+}
+
+/**
+ * Synchronize image relationships while retaining existing row IDs whenever
+ * the submitted ID belongs to this product, or an ID-less legacy payload can
+ * be matched to an existing path.
+ */
+function shop_sync_product_images(PDO $pdo, int $productId, array $images): void
+{
+    $stmt = $pdo->prepare('SELECT id, image_path, alt_text, sort_order FROM shop_product_images WHERE product_id = ? ORDER BY sort_order, id FOR UPDATE');
+    $stmt->execute([$productId]);
+    $current = $stmt->fetchAll();
+    $currentById = [];
+    foreach ($current as $row) $currentById[(int)$row['id']] = $row;
+
+    $used = [];
+    $resolved = [];
+    foreach ($images as $image) {
+        $imageId = isset($image['id']) ? (int)$image['id'] : null;
+        if ($imageId !== null) {
+            if (!isset($currentById[$imageId]) || isset($used[$imageId])) {
+                throw new DomainException('An image does not belong to this product or is duplicated.');
+            }
+        } else {
+            foreach ($current as $row) {
+                $candidate = (int)$row['id'];
+                if (!isset($used[$candidate]) && $row['image_path'] === $image['path']) {
+                    $imageId = $candidate;
+                    break;
+                }
+            }
+        }
+        if ($imageId !== null) $used[$imageId] = true;
+        $resolved[] = $image + ['id' => $imageId];
+    }
+
+    $unchanged = count($current) === count($resolved);
+    if ($unchanged) {
+        foreach ($resolved as $index => $image) {
+            $row = $current[$index];
+            if ($image['id'] !== (int)$row['id'] || $image['path'] !== $row['image_path']
+                || $image['altText'] !== $row['alt_text'] || $image['sortOrder'] !== (int)$row['sort_order']) {
+                $unchanged = false;
+                break;
+            }
+        }
+    }
+    if ($unchanged) return;
+
+    if ($current) {
+        $shift = $pdo->prepare('UPDATE shop_product_images SET sort_order = sort_order + ? WHERE product_id = ?');
+        $shift->execute([SHOP_MAX_IMAGES, $productId]);
+    }
+    $delete = $pdo->prepare('DELETE FROM shop_product_images WHERE id = ? AND product_id = ?');
+    foreach ($currentById as $imageId => $_row) {
+        if (!isset($used[$imageId])) $delete->execute([$imageId, $productId]);
+    }
+    $update = $pdo->prepare('UPDATE shop_product_images SET image_path = ?, alt_text = ?, sort_order = ? WHERE id = ? AND product_id = ?');
+    $insert = $pdo->prepare('INSERT INTO shop_product_images (product_id, image_path, alt_text, sort_order) VALUES (?, ?, ?, ?)');
+    foreach ($resolved as $image) {
+        if ($image['id'] !== null) {
+            $update->execute([$image['path'], $image['altText'], $image['sortOrder'], $image['id'], $productId]);
+        } else {
+            $insert->execute([$productId, $image['path'], $image['altText'], $image['sortOrder']]);
+        }
+    }
+}
+
+/** @return array{path:string,diskPath:string} */
+function shop_store_uploaded_image(mixed $file): array
+{
+    if (!is_array($file) || !isset($file['error'], $file['size'], $file['tmp_name'])
+        || !is_int($file['error']) || !is_int($file['size']) || !is_string($file['tmp_name'])
+        || $file['error'] !== UPLOAD_ERR_OK || $file['size'] < 1 || $file['size'] > MAX_UPLOAD_BYTES
+        || !is_uploaded_file($file['tmp_name'])) {
+        json_response(['error' => 'Choose one JPG, PNG, GIF, or WebP image, 8MB or smaller.'], 422);
+    }
+    $size = filesize($file['tmp_name']);
+    if ($size === false || $size < 1 || $size > MAX_UPLOAD_BYTES) {
+        json_response(['error' => 'Product image must be 8MB or smaller.'], 422);
+    }
+    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $image = @getimagesize($file['tmp_name']);
+    if (!isset($allowed[$mime]) || $image === false || ($image['mime'] ?? '') !== $mime || $image[0] < 1 || $image[1] < 1) {
+        json_response(['error' => 'Choose a valid JPG, PNG, GIF, or WebP image.'], 422);
+    }
+    $folder = PROJECT_UPLOAD_DIR . 'shop/';
+    if (!is_dir($folder) && !mkdir($folder, 0755, true)) json_response(['error' => 'Shop upload directory is unavailable.'], 500);
+    $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+    $diskPath = $folder . $filename;
+    if (!move_uploaded_file($file['tmp_name'], $diskPath)) json_response(['error' => 'Could not save product image.'], 500);
+    return ['path' => PROJECT_UPLOAD_URL . 'shop/' . $filename, 'diskPath' => $diskPath];
 }
 
 function shop_manual_badges(mixed $raw): array

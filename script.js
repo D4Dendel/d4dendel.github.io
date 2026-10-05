@@ -590,9 +590,18 @@ const adminProductList = document.getElementById('product-list');
 const productForm = document.getElementById('product-form');
 const productFormMessage = document.querySelector('[data-product-form-message]');
 const productBadgeInputs = [...document.querySelectorAll('[data-product-badge]')];
+const productImageList = document.querySelector('[data-product-image-list]');
+const productImageEmpty = document.querySelector('[data-product-image-empty]');
+const productUploadInput = document.querySelector('[data-product-upload-input]');
+const productUploadButton = document.querySelector('[data-product-upload]');
+const productUploadHelp = document.querySelector('[data-product-upload-help]');
+const productImageUrl = document.querySelector('[data-product-image-url]');
+const productAddUrlButton = document.querySelector('[data-product-add-url]');
 let adminProducts = [];
 let productSlugManuallyEdited = false;
 let productSubmitting = false;
+let productGalleryImages = [];
+let productGalleryBaseline = '[]';
 
 const formatProductMoney = (value) => `$${Number(value).toFixed(2)}`;
 
@@ -644,6 +653,7 @@ const setProductSubmitting = (submitting) => {
   document.querySelectorAll('[data-product-save], [data-product-toggle-publication], [data-cancel-product]').forEach((button) => {
     button.disabled = submitting;
   });
+  renderProductGallery();
 };
 
 const validateProductPricing = () => {
@@ -682,22 +692,120 @@ const validateProductBadges = () => {
   return valid;
 };
 
-const syncProductImagePreview = (product = null) => {
-  const preview = document.querySelector('[data-product-image-preview]');
-  if (!preview) return;
-  const image = preview.querySelector('img');
-  const count = preview.querySelector('[data-product-image-count]');
-  if (!product || !product.image) {
-    preview.hidden = true;
-    image.removeAttribute('src');
-    image.alt = '';
-    if (count) count.textContent = '';
-    return;
+const normalizedProductGallery = () => productGalleryImages.map((image, index) => ({
+  ...(image.id ? { id: image.id } : {}),
+  path: image.path,
+  altText: image.altText || '',
+  sortOrder: index + 1
+}));
+
+const productGallerySignature = () => JSON.stringify(normalizedProductGallery());
+const productGalleryDirty = () => productGallerySignature() !== productGalleryBaseline;
+
+const syncProductGalleryControls = () => {
+  const savedProduct = Boolean(productForm?.elements.id.value);
+  const atLimit = productGalleryImages.length >= 12;
+  const dirty = productGalleryDirty();
+  if (productUploadButton) productUploadButton.disabled = productSubmitting || !savedProduct || atLimit || dirty;
+  if (productUploadInput) productUploadInput.disabled = productSubmitting || !savedProduct || atLimit || dirty;
+  if (productAddUrlButton) productAddUrlButton.disabled = productSubmitting || atLimit;
+  if (productImageUrl) productImageUrl.disabled = productSubmitting || atLimit;
+  if (productUploadHelp) {
+    productUploadHelp.textContent = !savedProduct
+      ? 'Save the product as a draft before uploading files.'
+      : dirty
+        ? 'Save current image changes before uploading another file.'
+        : atLimit
+          ? 'The 12-image limit has been reached.'
+          : 'JPG, PNG, GIF, or WebP; maximum 8MB.';
   }
-  image.src = product.image;
-  image.alt = product.images?.[0]?.altText || '';
-  if (count) count.textContent = `${product.images.length} product image${product.images.length === 1 ? '' : 's'}`;
-  preview.hidden = false;
+};
+
+const renderProductGallery = () => {
+  if (!productImageList) return;
+  productGalleryImages = normalizedProductGallery();
+  productImageList.replaceChildren();
+  productGalleryImages.forEach((galleryImage, index) => {
+    const item = document.createElement('article');
+    item.className = 'cms-product-image-item';
+    const preview = document.createElement('img');
+    preview.src = galleryImage.path;
+    preview.alt = '';
+    const details = document.createElement('div');
+    details.className = 'cms-product-image-details';
+    const role = document.createElement('strong');
+    role.className = 'cms-product-image-role';
+    role.textContent = index === 0 ? 'Primary' : index === 1 ? 'Image 2 · future hover' : `Image ${index + 1}`;
+    const path = document.createElement('span');
+    path.className = 'cms-product-image-path';
+    path.textContent = galleryImage.path;
+    const altLabel = document.createElement('label');
+    const altTitle = document.createElement('span');
+    altTitle.textContent = 'Alt text';
+    const alt = document.createElement('input');
+    alt.type = 'text';
+    alt.maxLength = 255;
+    alt.value = galleryImage.altText;
+    alt.placeholder = 'Optional image description';
+    alt.disabled = productSubmitting;
+    alt.addEventListener('input', () => {
+      productGalleryImages[index].altText = alt.value;
+      syncProductGalleryControls();
+    });
+    altLabel.append(altTitle, alt);
+    details.append(role, path, altLabel);
+    const actions = document.createElement('div');
+    actions.className = 'cms-product-image-actions';
+    const moveUp = document.createElement('button');
+    moveUp.type = 'button';
+    moveUp.className = 'cms-button cms-button-subtle';
+    moveUp.textContent = 'Up';
+    moveUp.disabled = productSubmitting || index === 0;
+    moveUp.setAttribute('aria-label', `Move image ${index + 1} up`);
+    moveUp.addEventListener('click', () => {
+      [productGalleryImages[index - 1], productGalleryImages[index]] = [productGalleryImages[index], productGalleryImages[index - 1]];
+      renderProductGallery();
+    });
+    const moveDown = document.createElement('button');
+    moveDown.type = 'button';
+    moveDown.className = 'cms-button cms-button-subtle';
+    moveDown.textContent = 'Down';
+    moveDown.disabled = productSubmitting || index === productGalleryImages.length - 1;
+    moveDown.setAttribute('aria-label', `Move image ${index + 1} down`);
+    moveDown.addEventListener('click', () => {
+      [productGalleryImages[index], productGalleryImages[index + 1]] = [productGalleryImages[index + 1], productGalleryImages[index]];
+      renderProductGallery();
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'cms-button cms-button-danger';
+    remove.textContent = 'Remove';
+    remove.disabled = productSubmitting;
+    remove.setAttribute('aria-label', `Remove image ${index + 1} from product`);
+    remove.addEventListener('click', () => {
+      productGalleryImages.splice(index, 1);
+      renderProductGallery();
+      setProductMessage('Image removed from this product. Save changes to confirm.');
+    });
+    actions.append(moveUp, moveDown, remove);
+    item.append(preview, details, actions);
+    productImageList.append(item);
+  });
+  if (productImageEmpty) productImageEmpty.hidden = productGalleryImages.length > 0;
+  syncProductGalleryControls();
+};
+
+const setProductGallery = (images = []) => {
+  productGalleryImages = images.map((image, index) => ({
+    ...(image.id ? { id: Number(image.id) } : {}),
+    path: image.path,
+    altText: image.altText || '',
+    sortOrder: index + 1
+  }));
+  productGalleryBaseline = productGallerySignature();
+  if (productUploadInput) productUploadInput.value = '';
+  if (productImageUrl) productImageUrl.value = '';
+  renderProductGallery();
 };
 
 const resetProductForm = (clearMessage = true) => {
@@ -717,7 +825,7 @@ const resetProductForm = (clearMessage = true) => {
   document.querySelector('[data-product-form-title]')?.replaceChildren(document.createTextNode('Add product'));
   const cancel = document.querySelector('[data-cancel-product]');
   if (cancel) cancel.hidden = true;
-  syncProductImagePreview();
+  setProductGallery();
   syncProductPurchaseAction();
   syncProductPublishActions();
   if (clearMessage) setProductMessage();
@@ -743,12 +851,11 @@ const editAdminProduct = (product) => {
   productForm.elements.sortOrder.value = product.sortOrder;
   productForm.elements.purchaseAction.value = product.purchaseAction;
   productForm.elements.externalUrl.value = product.externalUrl || '';
-  productForm.elements.image.value = product.image || '';
   productBadgeInputs.forEach((input, index) => { input.value = product.manualBadges[index]?.label || ''; });
   productSlugManuallyEdited = true;
   document.querySelector('[data-product-form-title]').textContent = 'Edit product';
   document.querySelector('[data-cancel-product]').hidden = false;
-  syncProductImagePreview(product);
+  setProductGallery(product.images || []);
   syncProductPurchaseAction();
   syncProductPublishActions();
   setProductMessage();
@@ -768,10 +875,15 @@ const productManagementCard = (product) => {
   const card = document.createElement('article');
   card.className = 'cms-product-row';
   card.dataset.productId = String(product.id);
-  const image = document.createElement('img');
-  image.src = product.image;
-  image.alt = '';
-  image.loading = 'lazy';
+  const image = product.image ? document.createElement('img') : document.createElement('span');
+  if (product.image) {
+    image.src = product.image;
+    image.alt = '';
+    image.loading = 'lazy';
+  } else {
+    image.className = 'cms-product-row-placeholder';
+    image.textContent = 'No image';
+  }
   const main = document.createElement('div');
   main.className = 'cms-product-row-main';
   const sku = document.createElement('span');
@@ -879,6 +991,59 @@ productForm?.elements.price.addEventListener('input', validateProductPricing);
 productForm?.elements.salePrice.addEventListener('input', validateProductPricing);
 productBadgeInputs.forEach((input) => input.addEventListener('input', validateProductBadges));
 
+productAddUrlButton?.addEventListener('click', () => {
+  if (productGalleryImages.length >= 12) {
+    setProductMessage('A product can have no more than 12 images.', 'error');
+    return;
+  }
+  const path = productImageUrl?.value.trim() || '';
+  if (!path) {
+    setProductMessage('Enter an image URL or site-relative path.', 'error');
+    productImageUrl?.focus();
+    return;
+  }
+  productGalleryImages.push({ path, altText: '', sortOrder: productGalleryImages.length + 1 });
+  if (productImageUrl) productImageUrl.value = '';
+  renderProductGallery();
+  setProductMessage('Image added. Save the product to confirm gallery changes.');
+});
+
+productUploadButton?.addEventListener('click', async () => {
+  if (!productForm?.elements.id.value) {
+    setProductMessage('Save this product as a draft before uploading files.', 'error');
+    return;
+  }
+  if (productGalleryDirty()) {
+    setProductMessage('Save current image changes before uploading another file.', 'error');
+    return;
+  }
+  if (productGalleryImages.length >= 12) {
+    setProductMessage('A product can have no more than 12 images.', 'error');
+    return;
+  }
+  const file = productUploadInput?.files?.[0];
+  if (!file) {
+    setProductMessage('Choose an image to upload.', 'error');
+    productUploadInput?.focus();
+    return;
+  }
+  const payload = new FormData();
+  payload.set('id', productForm.elements.id.value);
+  payload.set('imageFile', file);
+  setProductSubmitting(true);
+  setProductMessage('Uploading image...');
+  try {
+    const result = await cmsRequest('product-image-upload', { method: 'POST', body: payload });
+    setProductGallery(result.product.images || []);
+    await renderAdminProducts();
+    setProductMessage('Image uploaded and added to the product.', 'success');
+  } catch (error) {
+    setProductMessage(error.message, 'error');
+  } finally {
+    setProductSubmitting(false);
+  }
+});
+
 const saveAdminProduct = async () => {
   if (!productForm || productSubmitting) return;
   validateProductPricing();
@@ -892,6 +1057,7 @@ const saveAdminProduct = async () => {
   formData.set('storefrontVisible', productForm.elements.storefrontVisible.checked ? '1' : '0');
   formData.set('showWhenSoldOut', productForm.elements.showWhenSoldOut.checked ? '1' : '0');
   formData.set('featured', productForm.elements.featured.checked ? '1' : '0');
+  formData.set('images', JSON.stringify(normalizedProductGallery()));
   const badges = productBadgeInputs
     .map((input) => input.value.trim().replace(/\s+/g, ' '))
     .filter(Boolean)

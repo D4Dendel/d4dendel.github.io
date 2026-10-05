@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -21,6 +22,8 @@ PHP = r"C:\xampp\php\php.exe"
 MYSQL = r"C:\xampp\mysql\bin\mysql.exe"
 DEBUG_PORT = 9334
 ARTIFACT_DIR = os.environ.get("SHOP_UI_ARTIFACT_DIR")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SHOP_MEDIA_DIR = os.path.join(ROOT, "img", "projectfolder", "shop")
 
 
 def expect(condition, message):
@@ -40,6 +43,39 @@ def api_request(action, method="GET", data=None, session_id=None):
         request.add_header("Cookie", "PHPSESSID=" + session_id)
     try:
         response = urllib.request.urlopen(request, timeout=10)
+        status = response.status
+        body = response.read()
+    except urllib.error.HTTPError as error:
+        status = error.code
+        body = error.read()
+    return status, json.loads(body.decode("utf-8"))
+
+
+def multipart_request(action, fields, file_name, file_bytes, content_type, session_id=None):
+    boundary = "----DyndelShopTest" + secrets.token_hex(12)
+    chunks = []
+    for name, value in fields.items():
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+            str(value).encode(), b"\r\n",
+        ])
+    chunks.extend([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="imageFile"; filename="{file_name}"\r\n'.encode(),
+        f"Content-Type: {content_type}\r\n\r\n".encode(),
+        file_bytes, b"\r\n", f"--{boundary}--\r\n".encode(),
+    ])
+    request = urllib.request.Request(
+        API + "?action=" + urllib.parse.quote(action),
+        data=b"".join(chunks),
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    if session_id:
+        request.add_header("Cookie", "PHPSESSID=" + session_id)
+    try:
+        response = urllib.request.urlopen(request, timeout=30)
         status = response.status
         body = response.read()
     except urllib.error.HTTPError as error:
@@ -213,6 +249,13 @@ def capture_screenshot(cdp, filename):
         image.write(base64.b64decode(result["data"]))
 
 
+def set_file_input(cdp, selector, path):
+    document = cdp.call("DOM.getDocument")
+    node = cdp.call("DOM.querySelector", {"nodeId": document["root"]["nodeId"], "selector": selector})
+    expect(node.get("nodeId"), "Could not find file input: " + selector)
+    cdp.call("DOM.setFileInputFiles", {"nodeId": node["nodeId"], "files": [path]})
+
+
 def normalized_preserved(product):
     return {
         "publicationStatus": product["publicationStatus"],
@@ -231,13 +274,23 @@ def normalized_preserved(product):
     }
 
 
+def normalized_non_media(product):
+    preserved = normalized_preserved(product)
+    preserved.pop("images")
+    return preserved
+
+
 checks = 0
 token = secrets.token_hex(4)
 session_id = "shopuibrowser" + token
 fixture_ids = []
+uploaded_test_paths = []
 chrome = None
 cdp = None
 profile = tempfile.mkdtemp(prefix="dyndel-shop-browser-")
+source_image = tempfile.NamedTemporaryFile(prefix="dyndel-shop-upload-", suffix=".png", delete=False)
+source_image.write(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
+source_image.close()
 
 auto_result = subprocess.run([
     MYSQL, "--host=127.0.0.1", "--user=root", "--batch", "--skip-column-names",
@@ -330,7 +383,6 @@ try:
         "externalUrl": "https://example.com/products/browser-regression",
         "images": json.dumps([
             {"path": primary_url, "altText": "Primary regression image", "sortOrder": 1},
-            {"path": hover_url, "altText": "Hover regression image", "sortOrder": 2},
         ]),
         "manualBadges": json.dumps([{"label": "Limited", "sortOrder": 1}]),
     }
@@ -356,7 +408,8 @@ try:
     live_form = cdp.evaluate("""
         (() => { const f=document.querySelector('#product-form'); return {
             id:f.elements.id.value, sku:f.elements.sku.value, title:f.elements.title.value,
-            image:f.elements.image.value, description:f.elements.description.value,
+            imageCount:document.querySelectorAll('[data-product-image-list] .cms-product-image-item').length,
+            primaryPath:document.querySelector('.cms-product-image-path')?.textContent || '', description:f.elements.description.value,
             price:f.elements.price.value, stock:f.elements.stock.value,
             heading:document.querySelector('[data-product-form-title]').textContent,
             cancelHidden:document.querySelector('[data-cancel-product]').hidden
@@ -364,17 +417,19 @@ try:
     """)
     expect(live_form["id"] == "1" and live_form["sku"] == initial_live[1]["sku"] and live_form["title"] == initial_live[1]["title"], "Edit did not populate the legacy form for a live product")
     expect(live_form["description"] == initial_live[1]["description"] and live_form["price"] == initial_live[1]["price"] and live_form["stock"] == str(initial_live[1]["stock"]), "Legacy edit fields were incomplete")
+    expect(live_form["imageCount"] == 1 and live_form["primaryPath"] == initial_live[1]["images"][0]["path"], "Existing live product image did not populate the gallery")
     expect(live_form["heading"] == "Edit product" and not live_form["cancelHidden"], "Edit mode controls did not activate")
     cdp.evaluate("document.querySelector('[data-cancel-product]').click()")
     expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === '' && document.querySelector('[data-cancel-product]').hidden"), "Cancel did not reset the product form")
-    checks += 4
+    expect(cdp.evaluate("document.querySelector('[data-product-upload]').disabled && document.querySelector('[data-product-upload-help]').textContent.includes('draft')"), "New-product upload limitation was not explained")
+    checks += 6
 
     cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
     fixture_form = cdp.evaluate("""
         (() => { const f=document.querySelector('#product-form'); return {
             id:f.elements.id.value, sku:f.elements.sku.value, title:f.elements.title.value,
             slug:f.elements.slug.value, shortDescription:f.elements.shortDescription.value,
-            image:f.elements.image.value, description:f.elements.description.value,
+            description:f.elements.description.value,
             price:f.elements.price.value, salePrice:f.elements.salePrice.value,
             productType:f.elements.productType.value, stock:f.elements.stock.value,
             publicationStatus:f.elements.publicationStatus.value,
@@ -383,7 +438,8 @@ try:
             featured:f.elements.featured.checked, sortOrder:f.elements.sortOrder.value,
             purchaseAction:f.elements.purchaseAction.value, externalUrl:f.elements.externalUrl.value,
             badges:[...document.querySelectorAll('[data-product-badge]')].map(input => input.value),
-            imageCount:document.querySelector('[data-product-image-count]').textContent,
+            imageCount:document.querySelectorAll('[data-product-image-list] .cms-product-image-item').length,
+            primaryRole:document.querySelector('.cms-product-image-role')?.textContent || '',
             saveText:document.querySelector('[data-product-save]').textContent,
             toggleText:document.querySelector('[data-product-toggle-publication]').textContent,
             valid:f.checkValidity()
@@ -393,10 +449,9 @@ try:
     expect(fixture_form["slug"] == v2_fields["slug"] and fixture_form["shortDescription"] == v2_fields["shortDescription"] and fixture_form["salePrice"] == v2_fields["salePrice"], "Basic or pricing fields were not populated")
     expect(fixture_form["productType"] == "digital" and fixture_form["publicationStatus"] == "published" and not fixture_form["storefrontVisible"] and not fixture_form["showWhenSoldOut"] and fixture_form["featured"], "Product type or publishing fields were not populated")
     expect(fixture_form["sortOrder"] == "777" and fixture_form["purchaseAction"] == "external" and fixture_form["externalUrl"] == v2_fields["externalUrl"], "Ordering or purchase fields were not populated")
-    expect(fixture_form["badges"][0] == "Limited" and fixture_form["imageCount"] == "2 product images", "Badge or image-count information was not populated")
+    expect(fixture_form["badges"][0] == "Limited" and fixture_form["imageCount"] == 1 and fixture_form["primaryRole"] == "Primary", "Badge or gallery information was not populated")
     expect(fixture_form["saveText"] == "Save Changes" and fixture_form["toggleText"] == "Unpublish", "Published product save actions were incorrect")
     checks += 5
-    capture_screenshot(cdp, "shop-admin-b3-desktop.png")
 
     invalid_ux = cdp.evaluate("""
         (() => {
@@ -464,6 +519,96 @@ try:
     expect(republished["publicationStatus"] == "published", "Publish action failed")
     checks += 2
 
+    with open(source_image.name, "rb") as image_source:
+        valid_png = image_source.read()
+    status, _ = multipart_request("product-image-upload", {"id": v2_id}, "unauth.png", valid_png, "image/png")
+    expect(status == 401, "Unauthenticated media upload was not rejected")
+    status, _ = multipart_request("product-image-upload", {"id": v2_id}, "not-image.txt", b"not an image", "text/plain", session_id)
+    expect(status == 422, "Unsupported upload was not rejected")
+    status, _ = multipart_request("product-image-upload", {"id": v2_id}, "oversized.png", b"0" * (8 * 1024 * 1024 + 1), "image/png", session_id)
+    expect(status == 422, "Oversized upload was not rejected")
+    checks += 3
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('[data-product-image-url]').value={js_string(hover_url)}; document.querySelector('[data-product-add-url]').click()")
+    expect(cdp.evaluate("document.querySelectorAll('[data-product-image-list] .cms-product-image-item').length") == 2, "Second image was not added in Admin")
+    cdp.evaluate("document.querySelector('#product-form').requestSubmit()")
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, second_admin = api_request("admin-products", session_id=session_id)
+    second_product = next(product for product in second_admin["products"] if product["id"] == v2_id)
+    expect([image["path"] for image in second_product["images"]] == [primary_url, hover_url], "Second image did not persist in order")
+    checks += 2
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
+    set_file_input(cdp, "[data-product-upload-input]", source_image.name)
+    cdp.evaluate("document.querySelector('[data-product-upload]').click()")
+    cdp.wait_for("document.querySelectorAll('[data-product-image-list] .cms-product-image-item').length === 3 && document.querySelector('[data-product-form-message]').textContent.includes('uploaded')", 20)
+    status, uploaded_admin = api_request("admin-products", session_id=session_id)
+    uploaded_product = next(product for product in uploaded_admin["products"] if product["id"] == v2_id)
+    uploaded_path = uploaded_product["images"][2]["path"]
+    uploaded_test_paths.append(uploaded_path)
+    expect(uploaded_path.startswith("img/projectfolder/shop/") and len(uploaded_product["images"]) == 3, "Uploaded third image was not stored in the Shop media directory")
+    expect(normalized_non_media(uploaded_product) == normalized_non_media(second_product), "Image upload altered non-media product fields")
+    preserved_before_gallery = normalized_non_media(uploaded_product)
+
+    cdp.evaluate("""
+        (() => {
+            document.querySelector('[aria-label="Move image 3 up"]').click();
+            document.querySelector('[aria-label="Move image 2 up"]').click();
+            const firstAlt=document.querySelector('.cms-product-image-item input[type="text"]');
+            firstAlt.value='Uploaded primary alt text';
+            firstAlt.dispatchEvent(new Event('input', {bubbles:true}));
+            document.querySelector('[aria-label="Remove image 2 from product"]').click();
+            document.querySelector('#product-form').requestSubmit();
+        })()
+    """)
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, gallery_admin = api_request("admin-products", session_id=session_id)
+    gallery_product = next(product for product in gallery_admin["products"] if product["id"] == v2_id)
+    expect([image["path"] for image in gallery_product["images"]] == [uploaded_path, hover_url], "Gallery reorder or middle-image removal failed")
+    expect([image["sortOrder"] for image in gallery_product["images"]] == [1, 2] and gallery_product["images"][0]["altText"] == "Uploaded primary alt text", "Gallery positions or alt text did not persist")
+    expect(gallery_product["image"] == uploaded_path, "Legacy image_url did not follow the reordered primary image")
+    expect(normalized_non_media(gallery_product) == preserved_before_gallery, "Gallery operations changed non-media product fields")
+    checks += 6
+
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
+    reload_gallery = cdp.evaluate("""
+        [...document.querySelectorAll('.cms-product-image-item')].map(item => ({
+            role:item.querySelector('.cms-product-image-role').textContent,
+            path:item.querySelector('.cms-product-image-path').textContent,
+            alt:item.querySelector('input[type="text"]').value
+        }))
+    """)
+    expect(reload_gallery == [
+        {"role": "Primary", "path": uploaded_path, "alt": "Uploaded primary alt text"},
+        {"role": "Image 2 · future hover", "path": hover_url, "alt": ""},
+    ], "Saved gallery did not reload exactly")
+    capture_screenshot(cdp, "shop-admin-b4-desktop.png")
+
+    cdp.navigate(BASE + "graphic-design.html")
+    cdp.wait_for(f"[...document.querySelectorAll('.shop-product h2')].some(title => title.textContent === {js_string(v2_fields['title'])})", 15)
+    public_primary = cdp.evaluate(f"""
+        (() => {{
+            const card=[...document.querySelectorAll('.shop-product')].find(item => item.querySelector('h2')?.textContent === {js_string(v2_fields['title'])});
+            return card?.querySelector('img')?.getAttribute('src') || '';
+        }})()
+    """)
+    expect(public_primary == uploaded_path, "Public Shop did not use the reordered primary image")
+    checks += 2
+
+    cdp.navigate(BASE + "admin.html")
+    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.evaluate("window.__shopTestAlerts=[]; window.alert=(message)=>window.__shopTestAlerts.push(String(message)); window.confirm=()=>true")
+    cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('[aria-label=\"Remove image 1 from product\"]').click(); document.querySelector('#product-form').requestSubmit()")
+    cdp.wait_for("document.querySelector('#product-form').elements.id.value === ''", 15)
+    status, removed_admin = api_request("admin-products", session_id=session_id)
+    removed_product = next(product for product in removed_admin["products"] if product["id"] == v2_id)
+    uploaded_disk_path = os.path.join(ROOT, *uploaded_path.split("/"))
+    expect([image["path"] for image in removed_product["images"]] == [hover_url], "Uploaded image relationship was not removed")
+    expect(os.path.isfile(uploaded_disk_path), "Removing an image relationship deleted its physical media file")
+    expect(normalized_non_media(removed_product) == preserved_before_gallery, "Image removal changed non-media product fields")
+    checks += 3
+
     legacy_sku = "TEST-UI-LEGACY-" + token.upper()
     legacy_title = "Browser Legacy Product " + token
     legacy_image = BASE + "img/illustration/balaam.jpg"
@@ -479,7 +624,8 @@ try:
             f.elements.title.value='Changed ' + f.elements.title.value;
             f.elements.title.dispatchEvent(new Event('input', {{bubbles:true}}));
             window.__slugAssist={{generated, manual:f.elements.slug.value}};
-            f.elements.image.value={js_string(legacy_image)};
+            document.querySelector('[data-product-image-url]').value={js_string(legacy_image)};
+            document.querySelector('[data-product-add-url]').click();
             f.elements.description.value='Legacy browser form product.';
             f.elements.price.value='12.50';
             f.elements.stock.value='2';
@@ -517,7 +663,8 @@ try:
             f.elements.shortDescription.value='Published short copy.';
             f.elements.description.value='Published product created through the B3 editor.';
             f.elements.category.value='Browser Tests';
-            f.elements.image.value={js_string(legacy_image)};
+            document.querySelector('[data-product-image-url]').value={js_string(legacy_image)};
+            document.querySelector('[data-product-add-url]').click();
             f.elements.price.value='30.00';
             f.elements.salePrice.value='25.00';
             f.elements.stock.value='1';
@@ -594,10 +741,11 @@ try:
     cdp.navigate(BASE + "admin.html")
     cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
-    mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .cms-product-row').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth})")
-    expect(mobile_admin == {"products": 4, "panelHidden": False, "width": 390}, "Mobile Admin Shop regression failed")
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
+    mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .cms-product-row').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth, images:document.querySelectorAll('.cms-product-image-item').length, role:document.querySelector('.cms-product-image-role')?.textContent || ''})")
+    expect(mobile_admin == {"products": 4, "panelHidden": False, "width": 390, "images": 1, "role": "Primary"}, "Mobile Admin Shop/gallery regression failed")
     checks += 1
-    capture_screenshot(cdp, "shop-admin-b3-mobile.png")
+    capture_screenshot(cdp, "shop-admin-b4-mobile.png")
 
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1
@@ -635,6 +783,16 @@ finally:
     temp_path = os.path.abspath(tempfile.gettempdir())
     if os.path.commonpath([profile_path, temp_path]) == temp_path and os.path.basename(profile_path).startswith("dyndel-shop-browser-"):
         shutil.rmtree(profile_path, ignore_errors=True)
+    shop_media_root = os.path.abspath(SHOP_MEDIA_DIR)
+    for uploaded_path in uploaded_test_paths:
+        if not re.fullmatch(r"img/projectfolder/shop/[0-9a-f]{32}\.(?:jpg|png|gif|webp)", uploaded_path):
+            continue
+        disk_path = os.path.abspath(os.path.join(ROOT, *uploaded_path.split("/")))
+        if os.path.commonpath([disk_path, shop_media_root]) == shop_media_root and os.path.isfile(disk_path):
+            os.remove(disk_path)
+    source_path = os.path.abspath(source_image.name)
+    if os.path.commonpath([source_path, os.path.abspath(tempfile.gettempdir())]) == os.path.abspath(tempfile.gettempdir()) and os.path.isfile(source_path):
+        os.remove(source_path)
 
 status, final_admin = api_request("admin-products", session_id=None)
 expect(status == 401, "Browser test session remained authenticated after logout")

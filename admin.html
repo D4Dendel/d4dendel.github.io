@@ -205,15 +205,17 @@
                             </fieldset>
 
                             <fieldset class="cms-product-section cms-product-media">
-                                <legend>Primary image</legend>
-                                <div class="cms-product-media-layout">
-                                    <div class="cms-product-image-preview" data-product-image-preview hidden><img alt=""><span data-product-image-count></span></div>
-                                    <div class="cms-product-fields">
-                                        <label><span>Upload replacement</span><input type="file" name="imageFile" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-                                        <label><span>Image URL or site-relative path</span><input type="text" name="image" maxlength="255" placeholder="img/shop/product.jpg"></label>
-                                        <p class="cms-product-help">Replacing the primary image keeps existing secondary gallery images. Gallery management arrives in B4.</p>
-                                    </div>
+                                <legend>Product images</legend>
+                                <p class="cms-product-help">Order defines each role: Image 1 is Primary, Image 2 is the future hover image, and later images belong to the product gallery. Up to 12 images.</p>
+                                <div class="cms-product-gallery" data-product-image-list></div>
+                                <p class="cms-product-gallery-empty" data-product-image-empty>No images added. Drafts may be saved without an image; publishing requires one.</p>
+                                <div class="cms-product-media-add">
+                                    <label><span>Upload image</span><input type="file" accept="image/jpeg,image/png,image/gif,image/webp" data-product-upload-input><small data-product-upload-help>Save the product as a draft before uploading files.</small></label>
+                                    <button type="button" class="cms-button" data-product-upload>Upload image</button>
+                                    <label><span>Add URL or site-relative path</span><input type="text" maxlength="255" placeholder="img/projectfolder/shop/product.jpg" data-product-image-url></label>
+                                    <button type="button" class="cms-button" data-product-add-url>Add image</button>
                                 </div>
+                                <p class="cms-product-help">Removing an image only removes it from this product. The physical media file is never deleted.</p>
                             </fieldset>
 
                             <p class="cms-form-message cms-product-message" data-product-form-message role="status" aria-live="polite"></p>

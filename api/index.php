@@ -717,6 +717,41 @@ if ($action === 'delete-project') {
     json_response(['deleted' => $stmt->rowCount() > 0]);
 }
 
+if ($action === 'product-image-upload') {
+    require_post();
+    require_auth();
+    $id = shop_positive_integer($_POST['id'] ?? null, 'Product ID');
+    $altText = shop_text($_POST['altText'] ?? '', 'Image alt text', 255);
+    $pdo = db();
+    $stored = shop_store_uploaded_image($_FILES['imageFile'] ?? null);
+    try {
+        $pdo->beginTransaction();
+        $product = $pdo->prepare('SELECT id FROM shop_products WHERE id = ? FOR UPDATE');
+        $product->execute([$id]);
+        if (!$product->fetch()) throw new DomainException('Product not found.');
+        $count = $pdo->prepare('SELECT COUNT(*) FROM shop_product_images WHERE product_id = ?');
+        $count->execute([$id]);
+        $position = (int)$count->fetchColumn() + 1;
+        if ($position > SHOP_MAX_IMAGES) throw new DomainException('A product can have no more than ' . SHOP_MAX_IMAGES . ' images.');
+        $insert = $pdo->prepare('INSERT INTO shop_product_images (product_id, image_path, alt_text, sort_order) VALUES (?, ?, ?, ?)');
+        $insert->execute([$id, $stored['path'], $altText, $position]);
+        if ($position === 1) {
+            $primary = $pdo->prepare('UPDATE shop_products SET image_url = ? WHERE id = ?');
+            $primary->execute([$stored['path'], $id]);
+        }
+        $pdo->commit();
+        json_response(['uploaded' => true, 'product' => shop_fetch_product($pdo, $id, true)], 201);
+    } catch (DomainException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (is_file($stored['diskPath'])) unlink($stored['diskPath']);
+        json_response(['error' => $error->getMessage()], 422);
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (is_file($stored['diskPath'])) unlink($stored['diskPath']);
+        throw $error;
+    }
+}
+
 if ($action === 'product') {
     require_post();
     require_auth();
@@ -732,7 +767,7 @@ if ($action === 'product') {
         if (!$current) json_response(['error' => 'Product not found.'], 404);
         $relations = shop_fetch_relations($pdo, [$id]);
         foreach ($relations['images'][$id] ?? [] as $image) {
-            $existingImages[] = ['path' => $image['image_path'], 'altText' => $image['alt_text'], 'sortOrder' => (int)$image['sort_order']];
+            $existingImages[] = ['id' => (int)$image['id'], 'path' => $image['image_path'], 'altText' => $image['alt_text'], 'sortOrder' => (int)$image['sort_order']];
         }
         foreach ($relations['badges'][$id] ?? [] as $badge) {
             $existingBadges[] = ['label' => $badge['label'], 'sortOrder' => (int)$badge['sort_order']];
@@ -789,20 +824,15 @@ if ($action === 'product') {
     $replaceImages = array_key_exists('images', $_POST);
     $images = $replaceImages ? shop_images($_POST['images']) : $existingImages;
     $uploadedPath = null;
+    $uploadedDiskPath = null;
     if (isset($_FILES['imageFile'])) {
         $uploadError = (int)($_FILES['imageFile']['error'] ?? UPLOAD_ERR_NO_FILE);
         if ($uploadError !== UPLOAD_ERR_OK && $uploadError !== UPLOAD_ERR_NO_FILE) json_response(['error' => 'Product image upload failed.'], 422);
         if ($uploadError === UPLOAD_ERR_OK) {
             if ($replaceImages) json_response(['error' => 'Submit either an image upload or the ordered images list, not both.'], 422);
-            $file = $_FILES['imageFile'];
-            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-            $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-            if ((int)$file['size'] > MAX_UPLOAD_BYTES || !isset($allowed[$mime])) json_response(['error' => 'Product image must be a JPG, PNG, GIF, or WebP under 8MB.'], 422);
-            $folder = PROJECT_UPLOAD_DIR . 'shop/';
-            if (!is_dir($folder) && !mkdir($folder, 0755, true)) json_response(['error' => 'Shop upload directory is unavailable.'], 500);
-            $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
-            if (!move_uploaded_file($file['tmp_name'], $folder . $filename)) json_response(['error' => 'Could not save product image.'], 500);
-            $uploadedPath = PROJECT_UPLOAD_URL . 'shop/' . $filename;
+            $stored = shop_store_uploaded_image($_FILES['imageFile']);
+            $uploadedPath = $stored['path'];
+            $uploadedDiskPath = $stored['diskPath'];
         }
     }
     $legacyImage = trim((string)($_POST['image'] ?? ''));
@@ -853,10 +883,7 @@ if ($action === 'product') {
         }
 
         if ($replaceImages) {
-            $deleteImages = $pdo->prepare('DELETE FROM shop_product_images WHERE product_id = ?');
-            $deleteImages->execute([$id]);
-            $insertImage = $pdo->prepare('INSERT INTO shop_product_images (product_id, image_path, alt_text, sort_order) VALUES (?, ?, ?, ?)');
-            foreach ($images as $image) $insertImage->execute([$id, $image['path'], $image['altText'], $image['sortOrder']]);
+            shop_sync_product_images($pdo, $id, $images);
         }
         if ($replaceBadges) {
             $deleteBadges = $pdo->prepare('DELETE FROM shop_product_badges WHERE product_id = ?');
@@ -870,13 +897,16 @@ if ($action === 'product') {
         json_response(['id' => $id, 'updated' => $current !== null, 'product' => $product], $current !== null ? 200 : 201);
     } catch (DomainException $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($uploadedDiskPath && is_file($uploadedDiskPath)) unlink($uploadedDiskPath);
         json_response(['error' => $error->getMessage()], 422);
     } catch (PDOException $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($uploadedDiskPath && is_file($uploadedDiskPath)) unlink($uploadedDiskPath);
         if ($error->getCode() === '23000') json_response(['error' => 'Product data conflicts with an existing value or constraint.'], 422);
         throw $error;
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($uploadedDiskPath && is_file($uploadedDiskPath)) unlink($uploadedDiskPath);
         throw $error;
     }
 }

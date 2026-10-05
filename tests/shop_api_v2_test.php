@@ -154,6 +154,42 @@ try {
     test_expect(array_column($soldProduct['badges'], 'label') === ['Sale', 'Sold Out', 'Featured', 'Limited'], 'Derived/manual badge response failed.');
     $checks += 3;
 
+    $soldFieldSnapshot = array_intersect_key($created['sold'], array_flip([
+        'id', 'sku', 'slug', 'title', 'shortDescription', 'description', 'category', 'productType',
+        'regularPrice', 'salePrice', 'stock', 'publicationStatus', 'storefrontVisible',
+        'showWhenSoldOut', 'featured', 'sortOrder', 'purchaseAction', 'externalUrl', 'active'
+    ]));
+    $firstImageId = $created['sold']['images'][0]['id'];
+    $secondImageId = $created['sold']['images'][1]['id'];
+    $thirdPath = 'img/test/' . $token . '-sold-gallery.jpg';
+    [$status, $galleryUpdate] = test_request('product', 'POST', [
+        'id' => $created['sold']['id'],
+        'images' => json_encode([
+            ['id' => $secondImageId, 'path' => $created['sold']['images'][1]['path'], 'altText' => 'New primary', 'sortOrder' => 1],
+            ['path' => $thirdPath, 'altText' => 'Third image', 'sortOrder' => 2],
+            ['id' => $firstImageId, 'path' => $created['sold']['images'][0]['path'], 'altText' => '', 'sortOrder' => 3],
+        ], JSON_THROW_ON_ERROR),
+    ], $sessionId);
+    test_expect($status === 200 && array_column($galleryUpdate['product']['images'], 'path') === [$created['sold']['images'][1]['path'], $thirdPath, $created['sold']['images'][0]['path']], 'Gallery add/reorder did not persist.');
+    test_expect($galleryUpdate['product']['images'][0]['id'] === $secondImageId && $galleryUpdate['product']['images'][2]['id'] === $firstImageId, 'Existing image row IDs were not preserved during reorder.');
+    test_expect($galleryUpdate['product']['image'] === $created['sold']['images'][1]['path'], 'Legacy primary image did not follow gallery order.');
+    test_expect(array_intersect_key($galleryUpdate['product'], $soldFieldSnapshot) === $soldFieldSnapshot, 'Gallery update altered product fields.');
+    $thirdImageId = $galleryUpdate['product']['images'][1]['id'];
+    [$status, $galleryRemoval] = test_request('product', 'POST', [
+        'id' => $created['sold']['id'],
+        'images' => json_encode([
+            ['id' => $secondImageId, 'path' => $created['sold']['images'][1]['path'], 'altText' => 'Edited primary alt', 'sortOrder' => 1],
+            ['id' => $firstImageId, 'path' => $created['sold']['images'][0]['path'], 'altText' => '', 'sortOrder' => 2],
+        ], JSON_THROW_ON_ERROR),
+    ], $sessionId);
+    test_expect($status === 200 && array_column($galleryRemoval['product']['images'], 'sortOrder') === [1, 2], 'Gallery removal did not normalize ordering.');
+    test_expect($galleryRemoval['product']['images'][0]['altText'] === 'Edited primary alt' && !in_array($thirdImageId, array_column($galleryRemoval['product']['images'], 'id'), true), 'Alt edit or relationship removal did not persist.');
+    [$status, $galleryDetail] = test_request('shop-product', 'GET', ['slug' => $created['sold']['slug']]);
+    test_expect($status === 200 && $galleryDetail['product']['image'] === $created['sold']['images'][1]['path'], 'Public product primary image did not follow reordered gallery.');
+    [$status] = test_request('product-image-upload', 'POST', ['id' => $created['sold']['id']]);
+    test_expect($status === 401, 'Unauthenticated product image upload was not rejected.');
+    $checks += 8;
+
     [$status] = test_request('shop-product', 'GET', ['slug' => $created['hidden']['slug']]);
     test_expect($status === 200, 'Published hidden product detail was not available.');
     [$status] = test_request('shop-product', 'GET', ['slug' => $created['draft']['slug']]);
@@ -167,6 +203,8 @@ try {
         test_product_fields($token, 'bad-price', ['salePrice' => '10.00']),
         test_product_fields($token, 'reserved-badge', ['manualBadges' => json_encode([['label' => 'Sale', 'sortOrder' => 1]], JSON_THROW_ON_ERROR)]),
         test_product_fields($token, 'duplicate-badge', ['manualBadges' => json_encode([['label' => 'Limited', 'sortOrder' => 1], ['label' => 'limited', 'sortOrder' => 2]], JSON_THROW_ON_ERROR)]),
+        test_product_fields($token, 'bad-image-path', ['images' => json_encode([['path' => '../private.jpg', 'altText' => '', 'sortOrder' => 1]], JSON_THROW_ON_ERROR)]),
+        test_product_fields($token, 'too-many-images', ['images' => json_encode(array_map(static fn(int $position): array => ['path' => "img/test/limit-{$position}.jpg", 'altText' => '', 'sortOrder' => $position], range(1, 13)), JSON_THROW_ON_ERROR)]),
     ];
     foreach ($invalidCases as $case) {
         [$status] = test_request('product', 'POST', $case, $sessionId);
