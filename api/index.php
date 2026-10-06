@@ -4,6 +4,7 @@ declare(strict_types=1);
 session_start();
 require __DIR__ . '/config.php';
 require __DIR__ . '/shop_products.php';
+require __DIR__ . '/shop_checkout.php';
 
 $action = $_GET['action'] ?? 'projects';
 
@@ -254,7 +255,19 @@ if ($action === 'admin-products' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     json_response(['products' => shop_products_response($pdo, $stmt->fetchAll(), true)]);
 }
 
+if ($action === 'checkout-quote') {
+    require_post();
+    json_response(['quote' => shop_checkout_quote(
+        db(),
+        $_POST['items'] ?? null,
+        $_POST['countryCode'] ?? null,
+        $_POST['shippingMethodId'] ?? null
+    )]);
+}
+
 if ($action === 'order') {
+    // Legacy compatibility only. Shop F2 must use a separate payment-aware
+    // order-creation flow; this endpoint still decrements stock immediately.
     require_post();
     $customerName = request_string('customerName', 160);
     $customerEmail = filter_var(trim((string)($_POST['customerEmail'] ?? '')), FILTER_VALIDATE_EMAIL);
@@ -279,7 +292,7 @@ if ($action === 'order') {
     $pdo = db();
     $pdo->beginTransaction();
     try {
-        $productStmt = $pdo->prepare("SELECT id, price, sale_price, stock, publication_status, purchase_action FROM shop_products WHERE id = ? FOR UPDATE");
+        $productStmt = $pdo->prepare("SELECT id, sku, title, product_type, price, sale_price, stock, publication_status, purchase_action FROM shop_products WHERE id = ? FOR UPDATE");
         $orderItems = [];
         $totalCents = 0;
         foreach ($quantities as $productId => $quantity) {
@@ -296,15 +309,23 @@ if ($action === 'order') {
                 throw new RuntimeException('Order total is too large.');
             }
             $totalCents += $unitCents * $quantity;
-            $orderItems[] = [$productId, $quantity, shop_money_from_cents($unitCents)];
+            $orderItems[] = [
+                $productId,
+                $product['sku'],
+                $product['title'],
+                $product['product_type'],
+                $quantity,
+                shop_money_from_cents($unitCents),
+                shop_money_from_cents($unitCents * $quantity),
+            ];
         }
-        $orderStmt = $pdo->prepare('INSERT INTO shop_orders (customer_name, customer_email, customer_address, total) VALUES (?, ?, ?, ?)');
-        $orderStmt->execute([$customerName, $customerEmail, $customerAddress, shop_money_from_cents($totalCents)]);
+        $orderStmt = $pdo->prepare('INSERT INTO shop_orders (customer_name, customer_email, customer_address, subtotal, total) VALUES (?, ?, ?, ?, ?)');
+        $orderStmt->execute([$customerName, $customerEmail, $customerAddress, shop_money_from_cents($totalCents), shop_money_from_cents($totalCents)]);
         $orderId = $pdo->lastInsertId();
-        $itemStmt = $pdo->prepare('INSERT INTO shop_order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)');
+        $itemStmt = $pdo->prepare('INSERT INTO shop_order_items (order_id, product_id, product_sku, product_name, product_type, currency, quantity, price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stockStmt = $pdo->prepare('UPDATE shop_products SET stock = stock - ? WHERE id = ?');
-        foreach ($orderItems as [$productId, $quantity, $price]) {
-            $itemStmt->execute([$orderId, $productId, $quantity, $price]);
+        foreach ($orderItems as [$productId, $sku, $name, $productType, $quantity, $price, $lineTotal]) {
+            $itemStmt->execute([$orderId, $productId, $sku, $name, $productType, SHOP_CURRENCY, $quantity, $price, $lineTotal]);
             $stockStmt->execute([$quantity, $productId]);
         }
         $pdo->commit();

@@ -228,13 +228,18 @@ try {
     test_expect($status === 201 && $order['order']['total'] === '37.50', 'Duplicate cart IDs were not aggregated with sale pricing.');
     $orderId = (int)$order['order']['id'];
     $orderIds[] = $orderId;
-    $itemStmt = $pdo->prepare('SELECT quantity, price FROM shop_order_items WHERE order_id = ?');
+    $itemStmt = $pdo->prepare('SELECT product_sku, product_name, product_type, currency, quantity, price, line_total FROM shop_order_items WHERE order_id = ?');
     $itemStmt->execute([$orderId]);
     $orderItems = $itemStmt->fetchAll();
     test_expect(count($orderItems) === 1 && (int)$orderItems[0]['quantity'] === 5 && $orderItems[0]['price'] === '7.50', 'Aggregated order item snapshot was incorrect.');
+    test_expect($orderItems[0]['product_sku'] === $created['internal']['sku'] && $orderItems[0]['product_name'] === $created['internal']['title'] && $orderItems[0]['product_type'] === 'physical' && $orderItems[0]['currency'] === 'USD' && $orderItems[0]['line_total'] === '37.50', 'Legacy order compatibility did not populate the F1 item snapshots.');
+    $orderStmt = $pdo->prepare('SELECT currency, subtotal, shipping_amount, tax_amount, discount_amount, total, status, order_origin, payment_status FROM shop_orders WHERE id = ?');
+    $orderStmt->execute([$orderId]);
+    $orderSnapshot = $orderStmt->fetch();
+    test_expect($orderSnapshot === ['currency' => 'USD', 'subtotal' => '37.50', 'shipping_amount' => '0.00', 'tax_amount' => '0.00', 'discount_amount' => '0.00', 'total' => '37.50', 'status' => 'pending', 'order_origin' => 'legacy', 'payment_status' => 'unpaid'], 'Legacy order compatibility did not populate the F1 order snapshots.');
     [$status, $deleteBlocked] = test_request('delete-product', 'POST', ['id' => $created['internal']['id']], $sessionId);
     test_expect($status === 409 && str_contains($deleteBlocked['error'] ?? '', 'existing order'), 'Ordered product deletion did not fail safely.');
-    $checks += 3;
+    $checks += 5;
 
     foreach ([1, 2, 3] as $existingId) {
         $found = false;

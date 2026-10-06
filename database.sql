@@ -96,25 +96,142 @@ CREATE TABLE IF NOT EXISTS shop_products (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS shop_shipping_zones (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(120) NOT NULL,
+    is_rest_of_world TINYINT(1) NOT NULL DEFAULT 0,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_shop_shipping_zones_listing (enabled, sort_order, id),
+    CONSTRAINT chk_shop_shipping_zones_flags CHECK (
+        is_rest_of_world IN (0, 1) AND enabled IN (0, 1)
+    )
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS shop_shipping_zone_countries (
+    zone_id INT UNSIGNED NOT NULL,
+    country_code CHAR(2) NOT NULL,
+    PRIMARY KEY (zone_id, country_code),
+    UNIQUE KEY uq_shop_shipping_country (country_code),
+    CONSTRAINT chk_shop_shipping_country_code CHECK (
+        country_code REGEXP '^[A-Z]{2}$'
+    ),
+    CONSTRAINT fk_shop_shipping_country_zone
+        FOREIGN KEY (zone_id) REFERENCES shop_shipping_zones(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS shop_shipping_methods (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    zone_id INT UNSIGNED NOT NULL,
+    code VARCHAR(64) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    estimated_delivery_min SMALLINT UNSIGNED NULL,
+    estimated_delivery_max SMALLINT UNSIGNED NULL,
+    estimated_delivery_unit ENUM('business_days', 'calendar_days') NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_shop_shipping_method_code (zone_id, code),
+    KEY idx_shop_shipping_methods_listing (zone_id, enabled, sort_order, id),
+    CONSTRAINT fk_shop_shipping_method_zone
+        FOREIGN KEY (zone_id) REFERENCES shop_shipping_zones(id) ON DELETE CASCADE,
+    CONSTRAINT chk_shop_shipping_method_price CHECK (price >= 0),
+    CONSTRAINT chk_shop_shipping_method_currency CHECK (currency = 'USD'),
+    CONSTRAINT chk_shop_shipping_method_enabled CHECK (enabled IN (0, 1)),
+    CONSTRAINT chk_shop_shipping_method_estimate CHECK (
+        (estimated_delivery_min IS NULL AND estimated_delivery_max IS NULL AND estimated_delivery_unit IS NULL)
+        OR (estimated_delivery_min IS NOT NULL AND estimated_delivery_max IS NOT NULL
+            AND estimated_delivery_unit IS NOT NULL AND estimated_delivery_min > 0
+            AND estimated_delivery_max >= estimated_delivery_min)
+    )
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS shop_orders (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_name VARCHAR(160) NOT NULL,
     customer_email VARCHAR(190) NOT NULL,
-    customer_address TEXT NOT NULL,
+    customer_phone VARCHAR(40) NULL,
+    customer_address TEXT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    shipping_required TINYINT(1) NOT NULL DEFAULT 1,
+    shipping_address_line1 VARCHAR(255) NULL,
+    shipping_address_line2 VARCHAR(255) NULL,
+    shipping_city VARCHAR(120) NULL,
+    shipping_region VARCHAR(120) NULL,
+    shipping_postal_code VARCHAR(32) NULL,
+    shipping_country_code CHAR(2) NULL,
+    shipping_method_id INT UNSIGNED NULL,
+    shipping_method_name VARCHAR(120) NULL,
+    shipping_estimate_min SMALLINT UNSIGNED NULL,
+    shipping_estimate_max SMALLINT UNSIGNED NULL,
+    shipping_estimate_unit ENUM('business_days', 'calendar_days') NULL,
+    subtotal DECIMAL(10,2) NOT NULL,
+    shipping_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     total DECIMAL(10,2) NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'pending',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+    order_origin ENUM('legacy', 'checkout_v2') NOT NULL DEFAULT 'legacy',
+    payment_status ENUM('unpaid', 'pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'unpaid',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_shop_orders_lifecycle (status, payment_status, created_at, id),
+    KEY idx_shop_orders_customer_email (customer_email, created_at, id),
+    CONSTRAINT fk_shop_orders_shipping_method
+        FOREIGN KEY (shipping_method_id) REFERENCES shop_shipping_methods(id) ON DELETE SET NULL,
+    CONSTRAINT chk_shop_orders_currency CHECK (currency = 'USD'),
+    CONSTRAINT chk_shop_orders_shipping_required CHECK (shipping_required IN (0, 1)),
+    CONSTRAINT chk_shop_orders_status CHECK (
+        status IN ('pending', 'confirmed', 'processing', 'shipped', 'completed', 'cancelled')
+    ),
+    CONSTRAINT chk_shop_orders_amounts CHECK (
+        subtotal >= 0 AND shipping_amount >= 0 AND tax_amount >= 0 AND discount_amount >= 0
+        AND discount_amount <= subtotal + shipping_amount + tax_amount
+        AND total = subtotal + shipping_amount + tax_amount - discount_amount
+    ),
+    CONSTRAINT chk_shop_orders_estimate CHECK (
+        (shipping_estimate_min IS NULL AND shipping_estimate_max IS NULL AND shipping_estimate_unit IS NULL)
+        OR (shipping_estimate_min IS NOT NULL AND shipping_estimate_max IS NOT NULL
+            AND shipping_estimate_unit IS NOT NULL AND shipping_estimate_min > 0
+            AND shipping_estimate_max >= shipping_estimate_min)
+    ),
+    CONSTRAINT chk_shop_orders_checkout_shipping CHECK (
+        order_origin = 'legacy'
+        OR (shipping_required = 0 AND shipping_address_line1 IS NULL
+            AND shipping_address_line2 IS NULL AND shipping_city IS NULL
+            AND shipping_region IS NULL AND shipping_postal_code IS NULL
+            AND shipping_country_code IS NULL AND shipping_method_name IS NULL
+            AND shipping_amount = 0)
+        OR (shipping_required = 1 AND shipping_address_line1 IS NOT NULL
+            AND shipping_city IS NOT NULL AND shipping_postal_code IS NOT NULL
+            AND shipping_country_code REGEXP '^[A-Z]{2}$'
+            AND shipping_method_name IS NOT NULL)
+    )
+) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shop_order_items (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     order_id INT UNSIGNED NOT NULL,
     product_id INT UNSIGNED NOT NULL,
+    product_sku VARCHAR(80) NOT NULL,
+    product_name VARCHAR(160) NOT NULL,
+    product_type ENUM('physical', 'digital') NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
     quantity INT UNSIGNED NOT NULL,
     price DECIMAL(10,2) NOT NULL,
+    line_total DECIMAL(10,2) NOT NULL,
     FOREIGN KEY (order_id) REFERENCES shop_orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES shop_products(id)
-);
+    FOREIGN KEY (product_id) REFERENCES shop_products(id),
+    CONSTRAINT chk_shop_order_items_quantity CHECK (quantity > 0),
+    CONSTRAINT chk_shop_order_items_currency CHECK (currency = 'USD'),
+    CONSTRAINT chk_shop_order_items_amounts CHECK (price >= 0 AND line_total = price * quantity)
+) ENGINE=InnoDB;
 
 INSERT IGNORE INTO shop_products (sku, title, description, image_url, price, stock) VALUES
 ('PRINT-GIVE-TITHES', 'Give Tithes Print', 'A signed art print from the illustration collection.', 'img/projectfolder/illustration/3fb32d2e14559607e08f0fbcc863e312.jpg', 18.00, 12),
