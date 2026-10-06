@@ -182,7 +182,7 @@ if (!$entry) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261005.nav2">
+    <link rel="stylesheet" href="css/style.css?v=20261006.shopf3">
 </head>
 <body data-page="story">
     <header class="header">
@@ -236,7 +236,7 @@ if (!$entry) {
         </section>
         <?php endif; ?>
     </main>
-    <footer class="footer"><p>&copy; 2026 Dyndel Pino</p></footer>
-    <script src="script.js?v=20261005.nav2"></script>
+    <footer class="footer"><div class="footer-inner"><p>&copy; 2026 Dyndel Pino</p><nav class="footer-policy-nav" aria-label="Store policies"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="shipping-delivery.html">Shipping</a><a href="returns-refunds.html">Returns</a><a href="digital-products.html">Digital Products</a></nav></div></footer>
+    <script src="script.js?v=20261006.shopf3"></script>
 </body>
 </html>

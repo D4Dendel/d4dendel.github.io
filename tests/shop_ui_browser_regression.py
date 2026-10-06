@@ -1767,13 +1767,14 @@ try:
                     subtotal:document.querySelector('[data-checkout-subtotal]').textContent,
                     shipping:document.querySelector('[data-checkout-shipping-total]').textContent,
                     total:document.querySelector('[data-checkout-total]').textContent,
+                    policyLinks:[...document.querySelectorAll('.checkout-policy-hooks a:not([hidden])')].map(link=>link.getAttribute('href')),
                     columns:layout.gridTemplateColumns.split(' ').length,
                     sticky:summary.position,
                     overflow:document.documentElement.scrollWidth > innerWidth
                 };
             })()
         """)
-        expect(physical_review["items"] == 1 and physical_review["method"] == "Standard International" and physical_review["estimate"] == "Estimated 7–14 business days" and physical_review["subtotal"] == "$18.00" and physical_review["shipping"] == "$12.00" and physical_review["total"] == "$30.00" and physical_review["columns"] == 2 and physical_review["sticky"] == "sticky" and not physical_review["overflow"], "Desktop physical order review, estimate, totals, or layout failed: " + json.dumps(physical_review))
+        expect(physical_review["items"] == 1 and physical_review["method"] == "Standard International" and physical_review["estimate"] == "Estimated 7–14 business days" and physical_review["subtotal"] == "$18.00" and physical_review["shipping"] == "$12.00" and physical_review["total"] == "$30.00" and physical_review["policyLinks"] == ["terms.html", "privacy.html", "shipping-delivery.html", "returns-refunds.html"] and physical_review["columns"] == 2 and physical_review["sticky"] == "sticky" and not physical_review["overflow"], "Desktop physical order review, policy links, estimate, totals, or layout failed: " + json.dumps(physical_review))
         capture_screenshot(cdp, "shop-f2-checkout-desktop.png")
 
         cdp.evaluate("document.querySelector('[data-checkout-submit]').click()")
@@ -1803,12 +1804,13 @@ try:
 
         cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:{checkout_digital_id},quantity:1}}])); location.href='checkout.html'")
         cdp.wait_for("!document.querySelector('[data-checkout-form]').hidden && document.querySelector('[data-checkout-total]').textContent === '$7.00'", 15)
-        digital_checkout = cdp.evaluate("({shipping:document.querySelector('[data-checkout-shipping]').hidden,delivery:document.querySelector('[data-checkout-delivery]').hidden,shippingRow:document.querySelector('[data-checkout-shipping-row]').hidden,items:document.querySelectorAll('.checkout-summary-item').length,total:document.querySelector('[data-checkout-total]').textContent})")
-        expect(digital_checkout == {"shipping": True, "delivery": True, "shippingRow": True, "items": 1, "total": "$7.00"}, "Digital-only Checkout displayed shipping or incorrect totals")
+        digital_checkout = cdp.evaluate("({shipping:document.querySelector('[data-checkout-shipping]').hidden,delivery:document.querySelector('[data-checkout-delivery]').hidden,shippingRow:document.querySelector('[data-checkout-shipping-row]').hidden,items:document.querySelectorAll('.checkout-summary-item').length,total:document.querySelector('[data-checkout-total]').textContent,policyLinks:[...document.querySelectorAll('.checkout-policy-hooks a:not([hidden])')].map(link=>link.getAttribute('href'))})")
+        expect(digital_checkout == {"shipping": True, "delivery": True, "shippingRow": True, "items": 1, "total": "$7.00", "policyLinks": ["terms.html", "privacy.html", "returns-refunds.html", "digital-products.html"]}, "Digital-only Checkout displayed shipping, incorrect totals, or incorrect policy links")
 
         cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:1,quantity:1}},{{id:{checkout_digital_id},quantity:1}}])); location.reload()")
         cdp.wait_for("!document.querySelector('[data-checkout-form]').hidden && document.querySelectorAll('.checkout-summary-item').length === 2", 15)
-        expect(cdp.evaluate("!document.querySelector('[data-checkout-shipping]').hidden && !document.querySelector('[data-checkout-delivery]').hidden") is True, "Mixed Checkout did not require shipping")
+        mixed_state = cdp.evaluate("({shipping:!document.querySelector('[data-checkout-shipping]').hidden && !document.querySelector('[data-checkout-delivery]').hidden,policies:[...document.querySelectorAll('.checkout-policy-hooks a:not([hidden])')].map(link=>link.getAttribute('href'))})")
+        expect(mixed_state == {"shipping": True, "policies": ["terms.html", "privacy.html", "shipping-delivery.html", "returns-refunds.html", "digital-products.html"]}, "Mixed Checkout did not require shipping or expose both contextual policies")
 
         theme_signatures = cdp.evaluate("""
             (() => {
@@ -1853,6 +1855,90 @@ try:
             mysql_value(f"DELETE FROM shop_products WHERE id={checkout_digital_id};")
         if checkout_zone_id:
             mysql_value(f"DELETE FROM shop_shipping_zones WHERE id={checkout_zone_id};")
+
+    policy_routes = [
+        ("terms.html", "Terms & Conditions"),
+        ("privacy.html", "Privacy Policy"),
+        ("shipping-delivery.html", "Shipping & Delivery Policy"),
+        ("returns-refunds.html", "Returns & Refunds Policy"),
+        ("digital-products.html", "Digital Products Policy"),
+    ]
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+    for route, heading in policy_routes:
+        cdp.navigate(BASE + route)
+        cdp.wait_for("document.querySelector('[data-policy-page]') && document.querySelectorAll('.policy-nav a').length === 5", 15)
+        policy_state = cdp.evaluate("""
+            (() => ({
+                heading:document.querySelector('h1').textContent,
+                title:document.title,
+                description:document.querySelector('meta[name="description"]')?.content || '',
+                storeCurrent:document.querySelector('.nav [data-nav-section="store"]').getAttribute('aria-current'),
+                policyLinks:[...document.querySelectorAll('.policy-nav a')].map(link=>link.getAttribute('href')),
+                footerLinks:[...document.querySelectorAll('.footer-policy-nav a')].map(link=>link.getAttribute('href')),
+                currentPolicies:document.querySelectorAll('.policy-nav [aria-current="page"]').length,
+                updated:document.querySelector('time[datetime="2026-10-06"]')?.textContent || '',
+                overflow:document.documentElement.scrollWidth > innerWidth,
+                readable:document.querySelector('.policy-content').getBoundingClientRect().width <= 721
+            }))()
+        """)
+        expected_policy_links = [item[0] for item in policy_routes]
+        expect(policy_state["heading"] == heading and heading.split(" Policy")[0] in policy_state["title"] and policy_state["description"] and policy_state["storeCurrent"] == "page" and policy_state["policyLinks"] == expected_policy_links and policy_state["footerLinks"] == expected_policy_links and policy_state["currentPolicies"] == 1 and policy_state["updated"] == "October 6, 2026" and not policy_state["overflow"] and policy_state["readable"], "Policy route structure, metadata, links, or desktop readability failed for " + route + ": " + json.dumps(policy_state))
+        if route == "terms.html":
+            capture_screenshot(cdp, "shop-f3-policy-desktop.png")
+        checks += 1
+
+    cdp.evaluate("localStorage.setItem('dyndelShopCart',JSON.stringify([{id:1,quantity:1}]))")
+    cdp.navigate(BASE + "terms.html")
+    cdp.wait_for("document.querySelector('[data-open-cart]').getAttribute('aria-hidden') === 'false'", 15)
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 10)
+    policy_cart = cdp.evaluate("({modal:document.querySelector('[data-cart-panel]').getAttribute('aria-modal'),checkoutHidden:document.querySelector('[data-cart-checkout]').hidden,items:document.querySelectorAll('[data-cart-item-id]').length,text:document.querySelector('[data-cart-items]').textContent,stored:localStorage.getItem('dyndelShopCart')})")
+    expect(policy_cart["modal"] == "true" and not policy_cart["checkoutHidden"] and policy_cart["items"] == 1, "Reusable Cart Drawer did not work on policy routes: " + json.dumps(policy_cart))
+    cdp.evaluate("document.querySelector('[data-close-cart]').click(); document.querySelector('[data-works-toggle]').click()")
+    expect(cdp.evaluate("document.querySelector('[data-works-toggle]').getAttribute('aria-expanded') === 'true'") is True, "Works navigation did not operate on a policy route")
+    checks += 2
+
+    cdp.navigate(BASE + "privacy.html")
+    policy_theme_signatures = cdp.evaluate("""
+        (() => {
+            const palettes=[
+                {accentColor:'#c86f52',pageBackground:'#fff0e8',surfaceColor:'#fff8f3',primaryText:'#3d2925',buttonRadius:'999px',galleryLayout:'uniform',galleryEdge:'rounded'},
+                {accentColor:'#d58aaa',pageBackground:'#fff4f8',surfaceColor:'#fffafd',primaryText:'#513747',buttonRadius:'8px',galleryLayout:'clean',galleryEdge:'slight'},
+                {accentColor:'#8da2ff',pageBackground:'#171925',surfaceColor:'#242738',primaryText:'#f3efff',buttonRadius:'4px',galleryLayout:'editorial',galleryEdge:'square'}
+            ];
+            return palettes.map(theme => {
+                applyPublicTheme(theme);
+                return {body:getComputedStyle(document.body).backgroundColor,title:getComputedStyle(document.querySelector('h1')).color,note:getComputedStyle(document.querySelector('.policy-note')).backgroundColor};
+            });
+        })()
+    """)
+    expect(len({item["body"] for item in policy_theme_signatures}) == 3 and len({item["title"] for item in policy_theme_signatures}) == 3 and len({item["note"] for item in policy_theme_signatures}) == 3, "Default, Pastel, and Midnight palettes did not restyle policy pages")
+    cdp.evaluate("fetch('api/index.php?action=theme').then(r=>r.json()).then(d=>applyPublicTheme(d.theme))", await_promise=True)
+    checks += 1
+
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1200, "height": 800, "deviceScaleFactor": 1, "mobile": False})
+    expect(cdp.evaluate("document.documentElement.scrollWidth <= innerWidth && getComputedStyle(document.querySelector('.policy-layout')).gridTemplateColumns.split(' ').length === 2") is True, "1200px policy layout overflowed or lost its reading column")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True})
+    for route, heading in policy_routes:
+        cdp.navigate(BASE + route)
+        expect(cdp.evaluate("document.querySelector('[data-policy-page]') !== null") is True, "Mobile policy route did not load: " + route)
+        mobile_policy = cdp.evaluate("""
+            (() => ({
+                heading:document.querySelector('h1').textContent,
+                columns:getComputedStyle(document.querySelector('.policy-layout')).gridTemplateColumns.split(' ').length,
+                navWrap:getComputedStyle(document.querySelector('.policy-nav')).flexWrap,
+                footerWrap:getComputedStyle(document.querySelector('.footer-policy-nav')).flexWrap,
+                overflow:document.documentElement.scrollWidth > innerWidth
+            }))()
+        """)
+        expect(mobile_policy == {"heading": heading, "columns": 1, "navWrap": "wrap", "footerWrap": "wrap", "overflow": False}, "Mobile policy layout failed for " + route + ": " + json.dumps(mobile_policy))
+        checks += 1
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    expect(cdp.evaluate("document.querySelector('.nav').classList.contains('open') && document.querySelector('.nav [data-nav-section=\"store\"]').getAttribute('aria-current') === 'page'") is True, "Mobile navigation or Store context failed on a policy route")
+    checks += 2
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    cdp.wait_for("!document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'hidden'", 5)
+    capture_screenshot(cdp, "shop-f3-policy-mobile.png")
 
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1

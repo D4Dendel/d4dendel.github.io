@@ -2789,6 +2789,7 @@ const cartCloseButton = document.querySelector('[data-close-cart]');
 const cartContinueButton = document.querySelector('[data-continue-shopping]');
 const cartCheckoutLink = document.querySelector('[data-cart-checkout]');
 const checkoutPage = document.querySelector('[data-checkout]');
+const policyPage = document.querySelector('[data-policy-page]');
 const CART_KEY = 'dyndelShopCart';
 const requestedProductSlug = new URLSearchParams(window.location.search).get('product')?.trim() || '';
 let shopProducts = [];
@@ -3414,7 +3415,7 @@ const restoreCartControlFocus = (...selectors) => {
   });
 };
 
-if (shopProductsTarget || shopProductDetailTarget || checkoutPage) {
+if (shopProductsTarget || shopProductDetailTarget || checkoutPage || policyPage) {
   renderCart();
   const message = document.createElement('p');
   if (requestedProductSlug && shopProductDetailTarget) {
@@ -3570,6 +3571,7 @@ if (checkoutPage && checkoutForm) {
   const submitButton = document.querySelector('[data-checkout-submit]');
   const handoff = document.querySelector('[data-checkout-handoff]');
   const digitalPolicy = document.querySelector('[data-digital-policy]');
+  const physicalPolicy = document.querySelector('[data-physical-policy]');
   const shippingRequiredFields = [...checkoutForm.querySelectorAll('[name="countryCode"], [name="addressLine1"], [name="city"], [name="postalCode"]')];
   let checkoutQuote = null;
   let selectedShippingMethod = null;
@@ -3650,6 +3652,7 @@ if (checkoutPage && checkoutForm) {
     checkoutEmpty.hidden = true;
     setShippingRequirements(quote.shippingRequired);
     digitalPolicy.hidden = !quote.items.some((item) => item.productType === 'digital');
+    physicalPolicy.hidden = !quote.shippingRequired;
     summaryItems.replaceChildren();
     quote.items.forEach((item) => {
       const row = document.createElement('article');

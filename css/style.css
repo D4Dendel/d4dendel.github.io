@@ -3110,6 +3110,21 @@ body.is-cart-open {
     margin-top: 5px;
 }
 
+.checkout-policy-hooks a {
+    color: var(--blue-deep);
+    font-weight: 700;
+    text-underline-offset: 3px;
+}
+
+.checkout-policy-hooks a:hover {
+    text-decoration-thickness: 2px;
+}
+
+.checkout-policy-hooks a:focus-visible {
+    outline: 2px solid var(--blue-deep);
+    outline-offset: 3px;
+}
+
 .checkout-submit {
     width: 100%;
     min-height: 54px;
@@ -3668,6 +3683,202 @@ body.is-cart-open {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     padding: 20px 30px;
+}
+
+.footer-inner {
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    width: min(1120px, 100%);
+}
+
+.footer-policy-nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 18px;
+    color: color-mix(in srgb, #f5f5f5 78%, transparent);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+}
+
+.footer-policy-nav a {
+    white-space: nowrap;
+    text-underline-offset: 3px;
+}
+
+body:not([data-page="admin"]) > main.policy-shell {
+    width: min(1120px, calc(100% - 48px));
+    margin-inline: auto;
+    padding-top: clamp(48px, 7vw, 82px);
+    padding-bottom: clamp(72px, 9vw, 112px);
+}
+
+.policy-heading {
+    max-width: 760px;
+    margin-bottom: 34px;
+}
+
+.policy-heading h1 {
+    margin-top: 8px;
+    font-size: clamp(2.7rem, 5vw, 4.8rem);
+    line-height: 0.96;
+}
+
+.policy-heading > p:last-child {
+    max-width: 64ch;
+    margin-top: 16px;
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.policy-updated {
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.policy-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 250px) minmax(0, 720px);
+    gap: clamp(42px, 7vw, 88px);
+    align-items: start;
+}
+
+.policy-nav {
+    position: sticky;
+    top: 112px;
+    display: grid;
+    gap: 5px;
+    padding-top: 4px;
+}
+
+.policy-nav p {
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.policy-nav a {
+    padding: 8px 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.policy-nav a:hover,
+.policy-nav a[aria-current="page"] {
+    color: var(--blue-deep);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+
+.policy-nav a:focus-visible,
+.policy-content a:focus-visible {
+    outline: 2px solid var(--blue-deep);
+    outline-offset: 3px;
+}
+
+.policy-content {
+    min-width: 0;
+}
+
+.policy-content section + section {
+    margin-top: 42px;
+    padding-top: 42px;
+    border-top: 1px solid var(--line);
+}
+
+.policy-content h2 {
+    margin-bottom: 15px;
+    font-family: "Patrick Hand", cursive;
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-weight: 400;
+    line-height: 1.1;
+}
+
+.policy-content h3 {
+    margin: 24px 0 9px;
+    font-size: 1rem;
+}
+
+.policy-content p,
+.policy-content li {
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.78;
+}
+
+.policy-content p + p,
+.policy-content ul + p,
+.policy-content p + ul {
+    margin-top: 14px;
+}
+
+.policy-content ul {
+    display: grid;
+    gap: 8px;
+    margin: 14px 0 0 1.15rem;
+    list-style: disc;
+}
+
+.policy-content strong {
+    color: var(--text);
+}
+
+.policy-content a {
+    color: var(--blue-deep);
+    font-weight: 700;
+    text-underline-offset: 3px;
+}
+
+.policy-note {
+    margin-top: 18px;
+    padding: 16px 18px;
+    border-left: 3px solid var(--blue-deep);
+    background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
+}
+
+@media (max-width: 760px) {
+    body:not([data-page="admin"]) > main.policy-shell {
+        width: min(100% - 32px, 1120px);
+        padding-top: 38px;
+        padding-bottom: 72px;
+    }
+
+    .policy-layout {
+        grid-template-columns: 1fr;
+        gap: 38px;
+    }
+
+    .policy-nav {
+        position: static;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .policy-nav p {
+        flex-basis: 100%;
+    }
+
+    .policy-content section + section {
+        margin-top: 34px;
+        padding-top: 34px;
+    }
+
+    .footer {
+        padding-inline: 20px;
+    }
 }
 
 .footer a {
