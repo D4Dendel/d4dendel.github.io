@@ -395,7 +395,14 @@ const contentTypeLabels = { blog: 'Blog', news: 'News', update: 'Update', announ
 const cmsRequest = async (action, options = {}) => {
   const response = await fetch(`${cmsApi}?action=${action}`, options);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'CMS request failed.');
+  if (!response.ok) {
+    const error = new Error(data.error || 'CMS request failed.');
+    error.status = response.status;
+    if (response.status === 401 && adminLoginPanel && !['login', 'session'].includes(action)) {
+      setAdminAuthentication(false, 'Your admin session expired. Sign in again.');
+    }
+    throw error;
+  }
   return data;
 };
 
@@ -414,29 +421,40 @@ const adminLoginForm = document.getElementById('admin-login-form');
 const adminLoginPanel = document.getElementById('admin-login-panel');
 const adminContent = document.getElementById('admin-content');
 const adminLoginMessage = document.getElementById('admin-login-message');
+let adminAuthenticated = false;
 
-const updateAdminVisibility = () => {
-  const isAuthenticated = sessionStorage.getItem(STORAGE_KEYS.adminSession) === 'authenticated';
-  if (adminLoginPanel) adminLoginPanel.hidden = isAuthenticated;
-  if (adminContent) adminContent.hidden = !isAuthenticated;
-  return isAuthenticated;
+const setAdminAuthentication = (authenticated, message = '') => {
+  adminAuthenticated = authenticated;
+  if (authenticated) sessionStorage.setItem(STORAGE_KEYS.adminSession, 'authenticated');
+  else sessionStorage.removeItem(STORAGE_KEYS.adminSession);
+  if (adminLoginPanel) adminLoginPanel.hidden = authenticated;
+  if (adminContent) adminContent.hidden = !authenticated;
+  if (adminLoginMessage) adminLoginMessage.textContent = message;
+  return authenticated;
+};
+
+const loadAdminWorkspace = async () => {
+  await Promise.allSettled([
+    renderProjectList(),
+    renderAdminProducts(),
+    renderAdminContent(),
+    loadAdminTheme()
+  ]);
 };
 
 const restoreCmsSession = async () => {
   if (!useCmsApi || !adminLoginPanel) return;
+  const hadBrowserSession = sessionStorage.getItem(STORAGE_KEYS.adminSession) === 'authenticated';
   try {
     const session = await cmsRequest('session');
     if (session.authenticated) {
-      sessionStorage.setItem(STORAGE_KEYS.adminSession, 'authenticated');
-      adminLoginPanel.hidden = true;
-      if (adminContent) adminContent.hidden = false;
-      renderProjectList();
-      if (useCmsApi) renderAdminProducts();
-      renderAdminContent();
-      loadAdminTheme();
+      setAdminAuthentication(true);
+      await loadAdminWorkspace();
+    } else {
+      setAdminAuthentication(false, hadBrowserSession ? 'Your admin session expired. Sign in again.' : '');
     }
   } catch (error) {
-    if (adminLoginMessage) adminLoginMessage.textContent = 'CMS connection unavailable.';
+    setAdminAuthentication(false, 'CMS connection unavailable.');
   }
 };
 
@@ -447,14 +465,9 @@ if (adminLoginForm) {
     if (useCmsApi) {
       try {
         await cmsRequest('login', { method: 'POST', body: formData });
-        sessionStorage.setItem(STORAGE_KEYS.adminSession, 'authenticated');
         adminLoginForm.reset();
-        if (adminLoginMessage) adminLoginMessage.textContent = '';
-        updateAdminVisibility();
-        renderProjectList();
-        if (useCmsApi) renderAdminProducts();
-        renderAdminContent();
-        loadAdminTheme();
+        setAdminAuthentication(true);
+        await loadAdminWorkspace();
       } catch (error) {
         if (adminLoginMessage) adminLoginMessage.textContent = error.message;
       }
@@ -468,10 +481,8 @@ if (adminLoginForm) {
       return;
     }
 
-    sessionStorage.setItem(STORAGE_KEYS.adminSession, 'authenticated');
     adminLoginForm.reset();
-    if (adminLoginMessage) adminLoginMessage.textContent = '';
-    updateAdminVisibility();
+    setAdminAuthentication(true);
     renderProjectList();
     if (useCmsApi) renderAdminProducts();
     renderAdminContent();
@@ -480,11 +491,11 @@ if (adminLoginForm) {
 }
 
 document.getElementById('admin-logout')?.addEventListener('click', async () => {
-  if (useCmsApi) {
-    await cmsRequest('logout', { method: 'POST' });
+  try {
+    if (useCmsApi) await cmsRequest('logout', { method: 'POST' });
+  } finally {
+    setAdminAuthentication(false);
   }
-  sessionStorage.removeItem(STORAGE_KEYS.adminSession);
-  updateAdminVisibility();
 });
 
 const renderProjectList = async () => {
@@ -693,6 +704,8 @@ const renderManagedProjectViews = async () => {
 
 const adminProductList = document.getElementById('product-list');
 const productForm = document.getElementById('product-form');
+const productManagement = document.querySelector('[data-product-management]');
+const productEditor = document.querySelector('[data-product-editor]');
 const productFormMessage = document.querySelector('[data-product-form-message]');
 const productBadgeInputs = [...document.querySelectorAll('[data-product-badge]')];
 const productImageList = document.querySelector('[data-product-image-list]');
@@ -707,6 +720,7 @@ let productSlugManuallyEdited = false;
 let productSubmitting = false;
 let productGalleryImages = [];
 let productGalleryBaseline = '[]';
+let productView = localStorage.getItem('dyndelAdminProductView') === 'list' ? 'list' : 'grid';
 
 const formatProductMoney = (value) => `$${Number(value).toFixed(2)}`;
 
@@ -928,12 +942,27 @@ const resetProductForm = (clearMessage = true) => {
   productBadgeInputs.forEach((input) => { input.value = ''; input.setCustomValidity(''); });
   productSlugManuallyEdited = false;
   document.querySelector('[data-product-form-title]')?.replaceChildren(document.createTextNode('Add product'));
-  const cancel = document.querySelector('[data-cancel-product]');
-  if (cancel) cancel.hidden = true;
   setProductGallery();
   syncProductPurchaseAction();
   syncProductPublishActions();
   if (clearMessage) setProductMessage();
+};
+
+const showProductManagement = ({ focus = true } = {}) => {
+  if (productManagement) productManagement.hidden = false;
+  if (productEditor) productEditor.hidden = true;
+  resetProductForm(false);
+  if (focus) document.querySelector('[data-open-product-editor]')?.focus();
+};
+
+const showProductEditor = (product = null) => {
+  if (productManagement) productManagement.hidden = true;
+  if (productEditor) productEditor.hidden = false;
+  if (product) editAdminProduct(product);
+  else {
+    resetProductForm();
+    productForm?.elements.title.focus();
+  }
 };
 
 const editAdminProduct = (product) => {
@@ -959,12 +988,12 @@ const editAdminProduct = (product) => {
   productBadgeInputs.forEach((input, index) => { input.value = product.manualBadges[index]?.label || ''; });
   productSlugManuallyEdited = true;
   document.querySelector('[data-product-form-title]').textContent = 'Edit product';
-  document.querySelector('[data-cancel-product]').hidden = false;
   setProductGallery(product.images || []);
   syncProductPurchaseAction();
   syncProductPublishActions();
   setProductMessage();
   productForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  productForm.elements.title.focus({ preventScroll: true });
 };
 
 const productStatusChip = (text, className = '') => {
@@ -997,16 +1026,26 @@ const productManagementCard = (product) => {
   const title = document.createElement('h3');
   title.textContent = product.title;
   const meta = document.createElement('p');
-  const priceText = product.onSale
-    ? `${formatProductMoney(product.currentPrice)} sale · ${formatProductMoney(product.regularPrice)} regular`
-    : formatProductMoney(product.currentPrice);
-  meta.textContent = `${priceText} · ${product.stock} in stock · ${productActionLabel(product.purchaseAction)}`;
+  meta.className = 'cms-product-price';
+  const currentPrice = document.createElement('span');
+  currentPrice.className = 'cms-product-current-price';
+  currentPrice.textContent = formatProductMoney(product.currentPrice);
+  meta.append(currentPrice);
+  if (product.onSale) {
+    const regularPrice = document.createElement('del');
+    regularPrice.className = 'cms-product-regular-price';
+    regularPrice.textContent = formatProductMoney(product.regularPrice);
+    meta.append(regularPrice);
+  }
+  const details = document.createElement('p');
+  details.className = 'cms-product-details';
+  details.textContent = `${product.productType === 'digital' ? 'Digital' : 'Physical'} · ${product.available ? 'In stock' : 'Sold out'} · ${productActionLabel(product.purchaseAction)}`;
   const state = document.createElement('div');
   state.className = 'cms-product-state';
   state.append(productStatusChip(product.publicationStatus === 'published' ? 'Published' : 'Draft', `is-${product.publicationStatus}`));
   state.append(productStatusChip(product.storefrontVisible ? 'Visible' : 'Hidden'));
   if (!product.available) state.append(productStatusChip('Sold Out', 'is-warning'));
-  main.append(sku, title, meta, state);
+  main.append(sku, title);
   const actions = document.createElement('div');
   actions.className = 'admin-item-actions';
   const edit = document.createElement('button');
@@ -1014,7 +1053,8 @@ const productManagementCard = (product) => {
   edit.type = 'button';
   edit.dataset.editProduct = String(product.id);
   edit.textContent = 'Edit';
-  edit.addEventListener('click', () => editAdminProduct(product));
+  edit.setAttribute('aria-label', `Edit ${product.title}`);
+  edit.addEventListener('click', () => showProductEditor(product));
   const remove = document.createElement('button');
   remove.className = 'cms-button cms-button-danger';
   remove.type = 'button';
@@ -1035,8 +1075,77 @@ const productManagementCard = (product) => {
     }
   });
   actions.append(edit, remove);
-  card.append(image, main, actions);
+  card.append(image, main, meta, details, state, actions);
   return card;
+};
+
+const productMatchesKind = (product, kind) => {
+  if (!kind) return true;
+  if (kind === 'available') return product.available;
+  if (kind === 'sold-out') return !product.available;
+  return product.productType === kind;
+};
+
+const renderProductManagementList = () => {
+  if (!adminProductList) return;
+  const search = (document.getElementById('product-search')?.value || '').trim().toLocaleLowerCase();
+  const publication = document.getElementById('product-publication-filter')?.value || '';
+  const visibility = document.getElementById('product-visibility-filter')?.value || '';
+  const kind = document.getElementById('product-kind-filter')?.value || '';
+  const sort = document.getElementById('product-sort')?.value || 'order-asc';
+  const filtered = adminProducts.filter((product) => {
+    const searchable = `${product.title} ${product.sku} ${product.category || ''}`.toLocaleLowerCase();
+    return (!search || searchable.includes(search))
+      && (!publication || product.publicationStatus === publication)
+      && (!visibility || product.storefrontVisible === (visibility === 'visible'))
+      && productMatchesKind(product, kind);
+  });
+  filtered.sort((first, second) => {
+    if (sort === 'newest' || sort === 'oldest') {
+      const difference = new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime();
+      return sort === 'newest' ? -difference : difference;
+    }
+    if (sort === 'title-asc') return first.title.localeCompare(second.title);
+    if (sort === 'title-desc') return second.title.localeCompare(first.title);
+    if (sort === 'price-asc') return Number(first.currentPrice) - Number(second.currentPrice);
+    if (sort === 'price-desc') return Number(second.currentPrice) - Number(first.currentPrice);
+    return Number(first.sortOrder) - Number(second.sortOrder) || Number(first.id) - Number(second.id);
+  });
+  adminProductList.replaceChildren();
+  if (!adminProducts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cms-empty-state';
+    empty.innerHTML = '<h2>No products yet</h2><p>Add the first product when you are ready.</p>';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'cms-button cms-button-primary';
+    add.textContent = '+ Add Product';
+    add.addEventListener('click', () => showProductEditor());
+    empty.append(add);
+    adminProductList.append(empty);
+  } else if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cms-empty-state';
+    empty.innerHTML = '<h2>No matching products</h2><p>Adjust the search or filters to see more products.</p>';
+    adminProductList.append(empty);
+  } else {
+    adminProductList.append(...filtered.map(productManagementCard));
+  }
+  adminProductList.classList.toggle('is-list-view', productView === 'list');
+  adminProductList.setAttribute('aria-busy', 'false');
+  const result = document.querySelector('[data-product-results]');
+  if (result) result.textContent = `${filtered.length} of ${adminProducts.length} product${adminProducts.length === 1 ? '' : 's'}`;
+};
+
+const syncProductView = () => {
+  document.querySelectorAll('[data-product-view]').forEach((control) => {
+    const active = control.dataset.productView === productView;
+    control.classList.toggle('is-active', active);
+    control.setAttribute('aria-pressed', String(active));
+  });
+  const listHead = document.querySelector('[data-product-list-head]');
+  if (listHead) listHead.hidden = productView !== 'list';
+  adminProductList?.classList.toggle('is-list-view', productView === 'list');
 };
 
 const renderAdminProducts = async () => {
@@ -1045,17 +1154,12 @@ const renderAdminProducts = async () => {
     adminProducts = (await cmsRequest('admin-products')).products;
     const productCount = document.querySelector('[data-dashboard-product-count]');
     if (productCount) productCount.textContent = String(adminProducts.length);
-    adminProductList.replaceChildren();
-    if (!adminProducts.length) {
-      const empty = document.createElement('p');
-      empty.className = 'cms-empty-state';
-      empty.textContent = 'No products yet.';
-      adminProductList.append(empty);
-    } else {
-      adminProductList.append(...adminProducts.map(productManagementCard));
-    }
+    renderProductManagementList();
+    syncProductView();
     if (!productForm?.elements.id.value) resetProductForm(false);
   } catch (error) {
+    adminProductList.setAttribute('aria-busy', 'false');
+    if (error.status === 401) return;
     adminProductList.replaceChildren();
     const note = document.createElement('p');
     note.className = 'admin-note';
@@ -1075,7 +1179,8 @@ document.querySelectorAll('[data-admin-module]').forEach((control) => control.ad
   document.querySelectorAll('[data-admin-module-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.adminModulePanel !== moduleName;
   });
-  if (moduleName === 'shop') renderAdminProducts();
+  if (moduleName === 'shop' && adminAuthenticated) renderAdminProducts();
+  if (moduleName === 'content' && adminAuthenticated) renderAdminContent();
 }));
 document.querySelector('[data-cancel-project]')?.addEventListener('click', () => {
   projectForm?.reset();
@@ -1083,7 +1188,19 @@ document.querySelector('[data-cancel-project]')?.addEventListener('click', () =>
   document.querySelector('[data-project-form-title]').textContent = 'Add project';
   document.querySelector('[data-cancel-project]').hidden = true;
 });
-document.querySelector('[data-cancel-product]')?.addEventListener('click', resetProductForm);
+document.querySelector('[data-open-product-editor]')?.addEventListener('click', () => showProductEditor());
+document.querySelector('[data-close-product-editor]')?.addEventListener('click', () => showProductManagement());
+document.querySelector('[data-cancel-product]')?.addEventListener('click', () => showProductManagement());
+['product-search', 'product-publication-filter', 'product-visibility-filter', 'product-kind-filter', 'product-sort'].forEach((id) => {
+  const control = document.getElementById(id);
+  if (control) control[control.type === 'search' ? 'oninput' : 'onchange'] = renderProductManagementList;
+});
+document.querySelectorAll('[data-product-view]').forEach((control) => control.addEventListener('click', () => {
+  productView = control.dataset.productView === 'list' ? 'list' : 'grid';
+  localStorage.setItem('dyndelAdminProductView', productView);
+  syncProductView();
+}));
+syncProductView();
 productForm?.elements.title.addEventListener('input', () => {
   if (!productForm.elements.id.value && !productSlugManuallyEdited) {
     productForm.elements.slug.value = productSlugFromTitle(productForm.elements.title.value);
@@ -1171,15 +1288,21 @@ const saveAdminProduct = async () => {
   setProductSubmitting(true);
   setProductMessage(publicationStatus === 'published' ? 'Publishing product...' : 'Saving draft...');
   try {
-    await cmsRequest('product', { method: 'POST', body: formData });
+    const result = await cmsRequest('product', { method: 'POST', body: formData });
     await renderAdminProducts();
-    resetProductForm(false);
-    setProductMessage(
-      publicationStatus === 'published'
-        ? (wasEditing ? 'Product changes published.' : 'Product published.')
-        : (wasEditing ? 'Draft changes saved.' : 'Draft saved.'),
-      'success'
-    );
+    if (!wasEditing && publicationStatus === 'draft') {
+      showProductEditor(result.product);
+      setProductMessage('Draft saved. Image uploads are now available.', 'success');
+    } else {
+      resetProductForm(false);
+      setProductMessage(
+        publicationStatus === 'published'
+          ? (wasEditing ? 'Product changes published.' : 'Product published.')
+          : 'Draft changes saved.',
+        'success'
+      );
+      showProductManagement();
+    }
   } catch (error) {
     setProductMessage(error.message, 'error');
   } finally {
@@ -1774,11 +1897,6 @@ const renderGalleryThemePreview = () => {
   }
 };
 
-const syncAdminAccent = (accent) => {
-  if (!themeForm || !/^#[\da-f]{6}$/i.test(accent || '')) return;
-  document.body.style.setProperty('--cms-accent', accent);
-};
-
 const applyThemePreview = () => {
   if (!themeForm || !galleryThemePreview) return false;
   if (!validateThemeColors()) return false;
@@ -1794,14 +1912,13 @@ const applyThemePreview = () => {
   };
   if (![values.accentColor, values.pageBackground, values.surfaceColor, values.primaryText].every((value) => /^#[\da-f]{6}$/i.test(value))) return false;
   if (!allowedThemeValues.radius.has(values.buttonRadius) || !allowedThemeValues.galleryLayout.has(values.galleryLayout) || !allowedThemeValues.galleryEdge.has(values.galleryEdge)) return false;
-  syncAdminAccent(values.accentColor);
   // Public preview colors belong to the preview, not the neutral Admin shell.
   galleryThemePreview.style.setProperty('--cms-bg', values.pageBackground);
   galleryThemePreview.style.setProperty('--cms-surface', values.surfaceColor);
   galleryThemePreview.style.setProperty('--cms-text', values.primaryText);
   galleryThemePreview.style.background = 'var(--cms-bg)';
   galleryThemePreview.style.color = 'var(--cms-text)';
-  document.body.style.setProperty('--button-radius', values.buttonRadius);
+  galleryThemePreview.style.setProperty('--button-radius', values.buttonRadius);
   galleryThemePreview.dataset.galleryLayout = values.galleryLayout;
   galleryThemePreview.dataset.galleryEdge = values.galleryEdge;
   syncThemeTagPreview();
@@ -1811,7 +1928,6 @@ const applyThemePreview = () => {
 
 const setThemeControls = (theme) => {
   if (!themeForm) return;
-  syncAdminAccent(theme.accentColor);
   themeForm.elements.accent.value = theme.accentColor;
   themeForm.elements.background.value = theme.pageBackground;
   themeForm.elements.surface.value = theme.surfaceColor;
@@ -1907,62 +2023,103 @@ document.querySelector('[data-theme-reset]')?.addEventListener('click', async ()
   }
 });
 
+const contentManagement = document.querySelector('[data-content-management]');
+const contentEditor = document.querySelector('[data-content-editor]');
+
+const contentManagementRow = (entry) => {
+  const row = document.createElement('article');
+  row.className = 'cms-content-row';
+  const preview = entry.coverImage ? document.createElement('img') : document.createElement('span');
+  if (entry.coverImage) {
+    preview.src = entry.coverImage;
+    preview.alt = '';
+  } else {
+    preview.className = 'cms-content-row-placeholder';
+    preview.textContent = (contentTypeLabels[entry.type] || 'Entry').slice(0, 1);
+  }
+  const main = document.createElement('div');
+  main.className = 'cms-content-row-main';
+  const title = document.createElement('h2');
+  title.textContent = entry.title;
+  const excerpt = document.createElement('p');
+  excerpt.textContent = entry.excerpt;
+  const meta = document.createElement('span');
+  meta.textContent = `${contentTypeLabels[entry.type] || entry.type} · ${entry.publishDate} · ${entry.cardSize}`;
+  const status = document.createElement('span');
+  status.className = `cms-content-status is-${entry.status}`;
+  status.textContent = entry.status === 'published' ? 'Published' : 'Draft';
+  main.append(title, excerpt, meta);
+  const actions = document.createElement('div');
+  actions.className = 'admin-item-actions';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'cms-button';
+  edit.dataset.editContent = String(entry.id);
+  edit.textContent = 'Edit';
+  edit.setAttribute('aria-label', `Edit ${entry.title}`);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'cms-button cms-content-delete';
+  remove.dataset.deleteContent = String(entry.id);
+  remove.textContent = 'Delete';
+  actions.append(status, edit, remove);
+  row.append(preview, main, actions);
+  return row;
+};
+
+const renderContentManagementList = () => {
+  const list = document.getElementById('content-list');
+  if (!list) return;
+  const search = (document.getElementById('content-search')?.value || '').trim().toLocaleLowerCase();
+  const status = document.getElementById('content-status-filter')?.value || '';
+  const type = document.getElementById('content-type-filter')?.value || '';
+  const sort = document.getElementById('content-sort')?.value || 'updated-desc';
+  const filtered = cmsContentEntries.filter((entry) => {
+    const searchable = `${entry.title} ${entry.excerpt || ''}`.toLocaleLowerCase();
+    return (!search || searchable.includes(search)) && (!status || entry.status === status) && (!type || entry.type === type);
+  });
+  filtered.sort((first, second) => {
+    if (sort === 'title-asc') return first.title.localeCompare(second.title);
+    if (sort === 'title-desc') return second.title.localeCompare(first.title);
+    if (sort === 'date-asc') return first.publishDate.localeCompare(second.publishDate) || Number(first.id) - Number(second.id);
+    if (sort === 'date-desc') return second.publishDate.localeCompare(first.publishDate) || Number(second.id) - Number(first.id);
+    return cmsContentEntries.indexOf(first) - cmsContentEntries.indexOf(second);
+  });
+  list.replaceChildren();
+  if (!cmsContentEntries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cms-empty-state';
+    empty.innerHTML = '<h2>No content entries</h2><p>Create a draft or publish a new story, news item, update, or announcement.</p>';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'cms-button cms-button-primary';
+    add.textContent = '+ Add Content';
+    add.addEventListener('click', () => showContentEditor());
+    empty.append(add);
+    list.append(empty);
+  } else if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cms-empty-state';
+    empty.innerHTML = '<h2>No matching content</h2><p>Adjust the search or filters to see more entries.</p>';
+    list.append(empty);
+  } else {
+    list.append(...filtered.map(contentManagementRow));
+  }
+  list.setAttribute('aria-busy', 'false');
+  const result = document.querySelector('[data-content-results]');
+  if (result) result.textContent = `${filtered.length} of ${cmsContentEntries.length} entr${cmsContentEntries.length === 1 ? 'y' : 'ies'}`;
+};
+
 const renderAdminContent = async () => {
   const list = document.getElementById('content-list');
   if (!list || !useCmsApi) return false;
   try {
     cmsContentEntries = (await cmsRequest('admin-content')).entries;
-    list.replaceChildren();
-    if (!cmsContentEntries.length) {
-      const empty = document.createElement('div');
-      empty.className = 'cms-empty-state';
-      const heading = document.createElement('h2');
-      heading.textContent = 'No content entries';
-      const note = document.createElement('p');
-      note.textContent = 'Create a draft or publish a new blog, news, update, or announcement.';
-      empty.append(heading, note);
-      list.append(empty);
-      return true;
-    }
-    cmsContentEntries.forEach((entry) => {
-      const row = document.createElement('article');
-      row.className = 'cms-content-row';
-      if (entry.coverImage) {
-        const image = document.createElement('img');
-        image.src = entry.coverImage;
-        image.alt = '';
-        row.append(image);
-      }
-      const main = document.createElement('div');
-      main.className = 'cms-content-row-main';
-      const title = document.createElement('h2');
-      title.textContent = entry.title;
-      const excerpt = document.createElement('p');
-      excerpt.textContent = entry.excerpt;
-      const meta = document.createElement('span');
-      meta.textContent = `${contentTypeLabels[entry.type] || entry.type} · ${entry.publishDate} · ${entry.cardSize}`;
-      const status = document.createElement('span');
-      status.className = `cms-content-status is-${entry.status}`;
-      status.textContent = entry.status === 'published' ? 'Published' : 'Draft';
-      main.append(title, excerpt, meta);
-      const actions = document.createElement('div');
-      actions.className = 'admin-item-actions';
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.className = 'cms-button';
-      edit.dataset.editContent = String(entry.id);
-      edit.textContent = 'Edit';
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'cms-button cms-content-delete';
-      remove.dataset.deleteContent = String(entry.id);
-      remove.textContent = 'Delete';
-      actions.append(status, edit, remove);
-      row.append(main, actions);
-      list.append(row);
-    });
+    renderContentManagementList();
     return true;
   } catch (error) {
+    list.setAttribute('aria-busy', 'false');
+    if (error.status === 401) return false;
     list.textContent = `Content list unavailable: ${error.message}`;
     return false;
   }
@@ -2396,17 +2553,31 @@ const resetContentForm = () => {
   renderContentCoverPreview('');
 };
 
-document.querySelector('[data-open-content-editor]')?.addEventListener('click', () => {
+const showContentManagement = ({ focus = true } = {}) => {
+  if (contentManagement) contentManagement.hidden = false;
+  if (contentEditor) contentEditor.hidden = true;
+  resetContentForm();
+  if (focus) document.querySelector('[data-open-content-editor]')?.focus();
+};
+
+const showContentEditor = () => {
   if (contentSaving) return;
   resetContentForm();
   initializeContentBlocks('', []);
-  document.querySelector('[data-content-editor]').hidden = false;
-});
+  if (contentManagement) contentManagement.hidden = true;
+  if (contentEditor) contentEditor.hidden = false;
+  contentForm?.elements.title.focus();
+};
+
+document.querySelector('[data-open-content-editor]')?.addEventListener('click', showContentEditor);
 document.querySelectorAll('[data-close-content-editor]').forEach((button) => button.addEventListener('click', () => {
   if (contentSaving) return;
-  document.querySelector('[data-content-editor]').hidden = true;
-  resetContentForm();
+  showContentManagement();
 }));
+['content-search', 'content-status-filter', 'content-type-filter', 'content-sort'].forEach((id) => {
+  const control = document.getElementById(id);
+  if (control) control[control.type === 'search' ? 'oninput' : 'onchange'] = renderContentManagementList;
+});
 listContentActions();
 
 function listContentActions() {
@@ -2442,7 +2613,9 @@ function listContentActions() {
       initializeContentBlocks(entry.id, entry.blocks);
       document.querySelector('[data-content-form-title]').textContent = 'Edit content entry';
       document.querySelector('[data-content-save]').textContent = 'Save Draft';
-      document.querySelector('[data-content-editor]').hidden = false;
+      if (contentManagement) contentManagement.hidden = true;
+      if (contentEditor) contentEditor.hidden = false;
+      contentForm.elements.title.focus();
       return;
     }
     const deleteButton = event.target.closest('[data-delete-content]');
@@ -2489,6 +2662,7 @@ const saveContentEntry = async (status) => {
     resetContentForm();
     initializeContentBlocks('', []);
     if (message) message.textContent = savedEntry.status === 'published' ? 'Content published.' : 'Draft saved.';
+    showContentManagement();
     await renderPublicContent();
   } catch (error) {
     if (message) message.textContent = error.message;
@@ -3904,7 +4078,6 @@ if (homepageContact) {
 }
 initializeStoriesArchive();
 updateSocialLinks();
-updateAdminVisibility();
 restoreCmsSession();
 
 const contactCtas = document.querySelectorAll('.contact-cta');

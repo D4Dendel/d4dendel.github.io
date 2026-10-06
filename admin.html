@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=20261004.f1">
-    <link rel="stylesheet" href="css/admin.css?v=20261004.f1">
+    <link rel="stylesheet" href="css/admin.css?v=20261006.admin-v2">
 </head>
 <body data-page="admin" class="cms-app">
     <header class="header cms-topbar">
@@ -96,9 +96,20 @@
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="content" hidden>
-                    <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1></div><button type="button" class="cms-button cms-button-primary" data-open-content-editor>New entry</button></div>
+                    <div data-content-management>
+                        <div class="cms-page-heading"><div><span class="cms-kicker">Publishing</span><h1>Content</h1><p>Manage stories, news, updates, and announcements.</p></div><button type="button" class="cms-button cms-button-primary" data-open-content-editor>+ Add Content</button></div>
+                        <div class="cms-toolbar cms-content-toolbar">
+                            <label class="cms-search"><span>Search content</span><input id="content-search" type="search" placeholder="Title or excerpt"></label>
+                            <label><span>Status</span><select id="content-status-filter"><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option></select></label>
+                            <label><span>Type</span><select id="content-type-filter"><option value="">All types</option><option value="blog">Blog</option><option value="news">News</option><option value="update">Update</option><option value="announcement">Announcement</option></select></label>
+                            <label><span>Sort by</span><select id="content-sort"><option value="updated-desc">Recently updated</option><option value="date-desc">Publish date, newest</option><option value="date-asc">Publish date, oldest</option><option value="title-asc">Title, A to Z</option><option value="title-desc">Title, Z to A</option></select></label>
+                        </div>
+                        <p class="cms-results-summary" data-content-results role="status" aria-live="polite"></p>
+                        <div id="content-list" class="cms-content-list" aria-busy="true"></div>
+                    </div>
                     <section class="cms-editor cms-content-editor" data-content-editor hidden>
-                        <div class="cms-section-heading"><div><span class="cms-kicker">Content entry</span><h2 data-content-form-title>Create content entry</h2></div><button type="button" class="cms-button cms-button-subtle" data-close-content-editor>Close</button></div>
+                        <button type="button" class="cms-back-button" data-close-content-editor>&larr; Back to Content</button>
+                        <div class="cms-section-heading"><div><span class="cms-kicker">Content entry</span><h2 data-content-form-title>Create content entry</h2></div></div>
                         <form class="cms-form cms-content-form" id="content-form" novalidate>
                             <input type="hidden" name="id">
                             <label><span>Title</span><input name="title" maxlength="180" required></label>
@@ -139,12 +150,25 @@
                             <p class="cms-form-message cms-content-wide" data-content-form-message role="status"></p>
                         </form>
                     </section>
-                    <div id="content-list" class="cms-content-list"></div>
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="shop" hidden>
-                    <div class="cms-page-heading"><div><span class="cms-kicker">Commerce</span><h1>Shop</h1></div></div>
-                    <section class="cms-editor cms-shop-editor" aria-labelledby="product-editor-title">
+                    <div data-product-management>
+                        <div class="cms-page-heading"><div><span class="cms-kicker">Commerce</span><h1>Products</h1><p>Manage products in Dyndel Store.</p></div><button type="button" class="cms-button cms-button-primary" data-open-product-editor>+ Add Product</button></div>
+                        <div class="cms-toolbar cms-product-toolbar">
+                            <label class="cms-search"><span>Search products</span><input id="product-search" type="search" placeholder="Name, SKU, or category"></label>
+                            <label><span>Publication</span><select id="product-publication-filter"><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option></select></label>
+                            <label><span>Visibility</span><select id="product-visibility-filter"><option value="">All visibility</option><option value="visible">Storefront visible</option><option value="hidden">Hidden</option></select></label>
+                            <label><span>Product</span><select id="product-kind-filter"><option value="">All products</option><option value="physical">Physical</option><option value="digital">Digital</option><option value="available">In stock</option><option value="sold-out">Sold out</option></select></label>
+                            <label><span>Sort by</span><select id="product-sort"><option value="order-asc">Store order</option><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="title-asc">Name, A to Z</option><option value="title-desc">Name, Z to A</option><option value="price-asc">Price, low to high</option><option value="price-desc">Price, high to low</option></select></label>
+                            <div class="cms-view-switch" role="group" aria-label="Product layout"><button type="button" class="is-active" data-product-view="grid" aria-pressed="true">Grid</button><button type="button" data-product-view="list" aria-pressed="false">List</button></div>
+                        </div>
+                        <p class="cms-results-summary" data-product-results role="status" aria-live="polite"></p>
+                        <div class="cms-product-list-head" data-product-list-head hidden aria-hidden="true"><span>Image</span><span>Product</span><span>Price</span><span>Details</span><span>Status</span><span>Action</span></div>
+                        <div id="product-list" class="cms-product-list" aria-busy="true"></div>
+                    </div>
+                    <section class="cms-editor cms-shop-editor" data-product-editor aria-labelledby="product-editor-title" hidden>
+                        <button type="button" class="cms-back-button" data-close-product-editor>&larr; Back to Products</button>
                         <div class="cms-section-heading"><div><span class="cms-kicker">Product editor</span><h2 id="product-editor-title" data-product-form-title>Add product</h2></div></div>
                         <form id="product-form" class="cms-form cms-product-form" novalidate>
                             <input type="hidden" name="id">
@@ -222,12 +246,10 @@
                             <div class="admin-form-actions cms-product-actions">
                                 <button type="submit" class="cms-button cms-button-primary" data-product-save>Save Draft</button>
                                 <button type="button" class="cms-button" data-product-toggle-publication>Publish</button>
-                                <button type="button" class="cms-button cms-button-subtle" data-cancel-product hidden>Cancel edit</button>
+                                <button type="button" class="cms-button cms-button-subtle" data-cancel-product>Cancel</button>
                             </div>
                         </form>
                     </section>
-                    <div class="cms-section-heading"><h2>Inventory</h2></div>
-                    <div id="product-list" class="cms-product-list"></div>
                 </section>
 
                 <section class="cms-module" data-admin-module-panel="theme" hidden>
@@ -266,6 +288,6 @@
         </div>
     </main>
 
-    <script src="script.js?v=20261004.f1"></script>
+    <script src="script.js?v=20261006.admin-v2"></script>
 </body>
 </html>

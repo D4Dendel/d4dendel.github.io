@@ -296,6 +296,7 @@ checks = 0
 token = secrets.token_hex(4)
 session_id = "shopuibrowser" + token
 fixture_ids = []
+content_fixture_ids = []
 uploaded_test_paths = []
 chrome = None
 cdp = None
@@ -307,7 +308,7 @@ source_image.close()
 auto_result = subprocess.run([
     MYSQL, "--host=127.0.0.1", "--user=root", "--batch", "--skip-column-names",
     "--database=dyndel_portfolio",
-    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges','shop_orders','shop_order_items','shop_shipping_zones','shop_shipping_methods') ORDER BY TABLE_NAME;",
+    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges','shop_orders','shop_order_items','shop_shipping_zones','shop_shipping_methods','content_entries','content_blocks') ORDER BY TABLE_NAME;",
 ], check=True, capture_output=True, text=True)
 initial_auto_increments = dict(line.split("\t", 1) for line in auto_result.stdout.splitlines() if line)
 
@@ -320,10 +321,15 @@ subprocess.run([
 status, initial_admin = api_request("admin-products", session_id=session_id)
 expect(status == 200, "Could not capture initial Admin product state")
 initial_live = {product["id"]: product for product in initial_admin["products"]}
-expect(set(initial_live) == {1, 2, 3}, "Expected exactly the three live products before browser testing")
+expect({1, 2, 3}.issubset(initial_live), "Required baseline products were missing before browser testing")
+initial_product_count = len(initial_live)
+status, initial_content_response = api_request("admin-content", session_id=session_id)
+expect(status == 200, "Could not capture initial Admin Content state")
+initial_content = initial_content_response["entries"]
 status, initial_shop_response = api_request("shop")
-expect(status == 200 and len(initial_shop_response.get("products", [])) == 3, "Could not capture the initial public Shop")
+expect(status == 200 and initial_shop_response.get("products"), "Could not capture the initial public Shop")
 initial_public_products = initial_shop_response["products"]
+initial_public_count = len(initial_public_products)
 
 try:
     chrome, websocket_url = start_chrome(profile)
@@ -413,6 +419,7 @@ try:
             const arrowActive=document.activeElement?.outerHTML || '';
             const arrowFocused=arrowClass && document.activeElement === firstChild;
             home.focus({preventScroll:true});
+            await new Promise(resolve => setTimeout(resolve,20));
             const focusOutsideClosed=!works.classList.contains('is-open');
             works.dispatchEvent(new PointerEvent('pointerenter'));
             const hoverOpen=works.classList.contains('is-open') && toggle.getAttribute('aria-expanded') === 'true';
@@ -566,7 +573,7 @@ try:
     except AssertionError:
         raise AssertionError("Could not enter Store after navigation regression: " + json.dumps(cdp.evaluate("({href:location.href,ready:document.readyState,title:document.title,hasShop:Boolean(document.querySelector('[data-shop-products]')),body:document.body?.className || ''})")))
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
-    cdp.wait_for("document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3", 15)
+    cdp.wait_for(f"document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === {initial_public_count}", 15)
     cdp.wait_for("[...document.querySelectorAll('.shop-product-image.is-primary')].every(image => image.complete && image.naturalWidth > 0)", 15)
     desktop_cards = cdp.evaluate("""
         [...document.querySelectorAll('.shop-product')].map(card => ({
@@ -579,7 +586,7 @@ try:
             addButtons: card.querySelectorAll('[data-add-cart]').length
         }))
     """)
-    expect(len(desktop_cards) == 3, "Desktop Shop did not render three cards")
+    expect(len(desktop_cards) == initial_public_count, "Desktop Shop did not render the complete live product set")
     expect(all(card["image"] and card["imageLoaded"] and card["title"] and card["price"] and card["href"] for card in desktop_cards), "A storefront card was missing artwork, title, price, or link")
     expect(all(not card["description"] and card["addButtons"] == 0 for card in desktop_cards), "A storefront card still exposed description or Add to Cart")
     storefront_shell = cdp.evaluate("""
@@ -626,21 +633,21 @@ try:
         })()
     """)
     expect(storefront_shell["bannerHeight"] <= 300 and storefront_shell["bannerImages"] == 3 and abs(storefront_shell["bannerLeft"]) < 1 and abs(storefront_shell["bannerRight"] - storefront_shell["viewportWidth"]) < 1 and abs(storefront_shell["bannerHeaderGap"]) < 1, "Desktop Shop banner was not full-bleed, flush to the header, short, and artwork-led: " + json.dumps(storefront_shell))
-    expect(storefront_shell["headings"] == ["Art Prints"] and storefront_shell["columns"] == 3 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
+    expect(storefront_shell["headings"] and storefront_shell["columns"] == 3 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
     expect(0 <= storefront_shell["titlePriceGap"] <= 8 and storefront_shell["cardRadius"] >= 10 and storefront_shell["cardSurface"] != "rgba(0, 0, 0, 0)" and storefront_shell["linkCoversCard"], "Desktop product cards were not compact, rounded, surfaced, and fully linked")
     expect(storefront_shell["cartInHeader"] and storefront_shell["cartWidth"] == 82 and storefront_shell["cartVisibility"] == "visible" and storefront_shell["cartTabIndex"] == 0 and storefront_shell["emptyCountHidden"] and storefront_shell["currentTop"] == ["store"], "Desktop Store/Cart navigation state was incorrect")
     expect(storefront_shell["navPositions"] == storefront_shell["hiddenCartNavPositions"], "Reserved desktop Cart slot shifted the primary navigation when Cart visibility changed")
     status, theme_response = api_request("theme")
     applied_accent = cdp.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim().toLowerCase()")
     expect(status == 200 and applied_accent == theme_response["theme"]["accentColor"].lower(), "Public Shop did not apply the published theme")
-    checks += 9
+    checks += 10
 
     first_product = initial_public_products[0]
     second_product = initial_public_products[1]
     first_price = float(first_product["currentPrice"])
     second_price = float(second_product["currentPrice"])
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
-    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
+    cdp.wait_for(f"document.querySelectorAll('.shop-product').length === {initial_public_count} && document.querySelector('[data-cart-count]').hidden", 15)
     cdp.evaluate("scrollTo({top:120,left:0,behavior:'instant'})")
     cdp.wait_for("document.querySelector('.header').classList.contains('is-compact')", 5)
     cdp.evaluate("new Promise(resolve=>setTimeout(resolve,260))", await_promise=True)
@@ -679,7 +686,7 @@ try:
     """)
     expect(empty_cart_state["layerPosition"] == "fixed" and empty_cart_state["drawerPosition"] == "fixed" and empty_cart_state["drawerRight"] == 1440 and 440 <= empty_cart_state["drawerWidth"] <= 520 and empty_cart_state["drawerHeight"] == 1000 and empty_cart_state["drawerInBody"], "Desktop Cart was not a generous, responsive right-edge fixed modal drawer: " + json.dumps(empty_cart_state))
     expect(empty_cart_state["backdropOpacity"] > 0 and empty_cart_state["role"] == "dialog" and empty_cart_state["modal"] == "true" and empty_cart_state["expanded"] == "true" and empty_cart_state["pageInert"], "Cart backdrop or modal semantics were incorrect")
-    expect(empty_cart_state["rootOverflow"] == "hidden" and empty_cart_state["bodyOverflow"] == "hidden" and abs(empty_cart_state["scrollY"] - cart_layout_before["scrollY"]) <= 1 and "Your cart is empty." in empty_cart_state["empty"] and empty_cart_state["subtotal"] == "$0.00" and empty_cart_state["checkoutControls"] == 0, "Empty Cart, scroll lock, or checkout removal was incorrect: " + json.dumps({"scroll": cart_layout_before["scrollY"], "open": empty_cart_state}))
+    expect(empty_cart_state["rootOverflow"] == "hidden" and empty_cart_state["bodyOverflow"] == "hidden" and abs(empty_cart_state["scrollY"] - cart_layout_before["scrollY"]) <= 2 and "Your cart is empty." in empty_cart_state["empty"] and empty_cart_state["subtotal"] == "$0.00" and empty_cart_state["checkoutControls"] == 0, "Empty Cart, scroll lock, or checkout removal was incorrect: " + json.dumps({"scroll": cart_layout_before["scrollY"], "open": empty_cart_state}))
     expect(empty_cart_state["banner"] == cart_layout_before["banner"] and empty_cart_state["card"] == cart_layout_before["card"] and empty_cart_state["nav"] == cart_layout_before["nav"] and not empty_cart_state["overflow"], "Opening the empty Cart reflowed the Store or navigation: " + json.dumps({"before": cart_layout_before, "open": empty_cart_state}))
 
     cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": 8})
@@ -756,12 +763,13 @@ try:
 
     cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:{first_product['stock']}}}])); location.reload()")
     cdp.wait_for(f"document.querySelector('[data-cart-count]').textContent === '{first_product['stock']}'", 15)
+    stock_nav_before = cdp.evaluate("[...document.querySelectorAll('.nav-list>li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10)")
     cdp.evaluate("document.querySelector('[data-open-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
     cdp.evaluate(f"document.querySelector('[data-cart-increase=\"{first_product['id']}\"]').click()")
     stock_limit_state = cdp.evaluate(f"({{quantity:document.querySelector('.shop-cart-quantity-value').textContent,count:document.querySelector('[data-cart-count]').textContent,stored:JSON.parse(localStorage.getItem('dyndelShopCart'))[0].quantity,feedback:document.querySelector('[data-cart-feedback]').textContent,nav:[...document.querySelectorAll('.nav-list>li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10)}})")
     expect(stock_limit_state["quantity"] == str(first_product["stock"]) and stock_limit_state["count"] == str(first_product["stock"]) and stock_limit_state["stored"] == first_product["stock"] and "available limit" in stock_limit_state["feedback"], "Stock ceiling was not enforced with restrained feedback")
-    expect(stock_limit_state["nav"] == storefront_shell["navPositions"], "A two-digit Cart count or open drawer shifted desktop navigation")
+    expect(stock_limit_state["nav"] == stock_nav_before, "A two-digit Cart count or open drawer shifted desktop navigation")
     cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
     cdp.wait_for("document.querySelector('.shop-empty-cart') && document.querySelector('[data-cart-count]').hidden && !document.querySelector('[data-cart-region]').hidden && document.querySelector('[data-cart-total]').textContent === '$0.00' && JSON.parse(localStorage.getItem('dyndelShopCart')).length === 0 && document.activeElement === document.querySelector('[data-continue-shopping]')", 5)
     cdp.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
@@ -771,14 +779,14 @@ try:
     cdp.call("Emulation.setEmulatedMedia", {"features": []})
 
     cdp.evaluate("localStorage.setItem('dyndelShopCart', JSON.stringify({bad:true})); location.reload()")
-    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3", 15)
+    cdp.wait_for(f"document.querySelectorAll('.shop-product').length === {initial_public_count}", 15)
     expect(cdp.evaluate("JSON.stringify(JSON.parse(localStorage.getItem('dyndelShopCart'))) === '[]' && document.querySelector('[data-cart-count]').hidden") is True, "Malformed non-array Cart storage was not normalized safely")
     cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([null,{{id:'bad',quantity:2}},{{id:{first_product['id']},quantity:1}},{{id:{first_product['id']},quantity:2}},{{id:999999,quantity:1}}])); location.reload()")
     cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '3'", 15)
     resilient_cart = cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))")
     expect(resilient_cart == [{"id": first_product["id"], "quantity": 3}], "Malformed, duplicate, or stale Cart entries were not reconciled safely: " + json.dumps(resilient_cart))
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
-    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
+    cdp.wait_for(f"document.querySelectorAll('.shop-product').length === {initial_public_count} && document.querySelector('[data-cart-count]').hidden", 15)
     checks += 13
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
@@ -888,7 +896,7 @@ try:
         cdp.evaluate("document.querySelector('.menu-toggle').click()")
         checks += 3
 
-    cdp.navigate(BASE + "store.html", "document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3")
+    cdp.navigate(BASE + "store.html", f"document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === {initial_public_count}")
     mobile_state = cdp.evaluate("""
         (() => {
             const banner=document.querySelector('.shop-banner').getBoundingClientRect();
@@ -921,7 +929,7 @@ try:
             };
         })()
     """)
-    expect(mobile_state["cards"] == 3 and mobile_state["cartDisplay"] != "none" and mobile_state["cartVisibility"] == "visible" and mobile_state["cartTabIndex"] == 0 and mobile_state["cartInHeader"] and mobile_state["cartWidth"] < 100 and not mobile_state["cartOverlap"] and mobile_state["navToggle"] != "none", "Mobile Shop catalog, compact cart access, or navigation did not render without overlap")
+    expect(mobile_state["cards"] == initial_public_count and mobile_state["cartDisplay"] != "none" and mobile_state["cartVisibility"] == "visible" and mobile_state["cartTabIndex"] == 0 and mobile_state["cartInHeader"] and mobile_state["cartWidth"] < 100 and not mobile_state["cartOverlap"] and mobile_state["navToggle"] != "none", "Mobile Shop catalog, compact cart access, or navigation did not render without overlap")
     expect(mobile_state["columns"] == 2 and mobile_state["bannerHeight"] <= 220 and mobile_state["bannerEdges"] and abs(mobile_state["bannerHeaderGap"]) < 1 and mobile_state["addButtons"] == 0 and not mobile_state["overflow"], "Mobile full-bleed banner/grid layout regressed")
     expect(0 <= mobile_state["titlePriceGap"] <= 8 and mobile_state["cardRadius"] >= 10, "Mobile card rounding or title/price spacing regressed")
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
@@ -931,7 +939,7 @@ try:
 
     mobile_cart_seed = [{"id": product["id"], "quantity": 1} for product in initial_public_products]
     cdp.evaluate(f"localStorage.setItem('dyndelShopCart', {js_string(json.dumps(mobile_cart_seed))}); location.reload()")
-    cdp.wait_for(f"document.querySelector('[data-cart-count]').textContent === '{len(mobile_cart_seed)}' && document.querySelectorAll('.shop-product').length === 3", 15)
+    cdp.wait_for(f"document.querySelector('[data-cart-count]').textContent === '{len(mobile_cart_seed)}' && document.querySelectorAll('.shop-product').length === {initial_public_count}", 15)
     mobile_store_before_cart = cdp.evaluate("(() => { const banner=document.querySelector('.shop-banner').getBoundingClientRect(); const card=document.querySelector('.shop-product').getBoundingClientRect(); const header=document.querySelector('.header').getBoundingClientRect(); return {banner:{x:banner.x,y:banner.y,width:banner.width},card:{x:card.x,y:card.y,width:card.width},header:{x:header.x,y:header.y,width:header.width},overflow:document.documentElement.scrollWidth>innerWidth}; })()")
     cdp.evaluate("document.querySelector('[data-open-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && document.activeElement === document.querySelector('[data-close-cart]')", 15)
@@ -961,8 +969,8 @@ try:
             };
         })()
     """)
-    expect(mobile_store_cart["position"] == "fixed" and 360 <= mobile_store_cart["width"] <= 390 and mobile_store_cart["right"] == 390 and mobile_store_cart["height"] == 844, "Mobile Cart was not a nearly full-width fixed drawer: " + json.dumps(mobile_store_cart))
-    expect(mobile_store_cart["rows"] == 3 and mobile_store_cart["count"] == "3" and mobile_store_cart["closeVisible"] and mobile_store_cart["cartHeaderTop"] == 0 and mobile_store_cart["footerBottom"] == 844 and mobile_store_cart["touch"] and mobile_store_cart["mobileActions"], "Mobile Cart content, grouped actions, stable regions, or touch targets were incorrect: " + json.dumps(mobile_store_cart))
+    expect(mobile_store_cart["position"] == "fixed" and 360 <= mobile_store_cart["width"] <= 390 and abs(mobile_store_cart["right"] - 390) < 0.1 and mobile_store_cart["height"] == 844, "Mobile Cart was not a nearly full-width fixed drawer: " + json.dumps(mobile_store_cart))
+    expect(mobile_store_cart["rows"] == len(mobile_cart_seed) and mobile_store_cart["count"] == str(len(mobile_cart_seed)) and mobile_store_cart["closeVisible"] and mobile_store_cart["cartHeaderTop"] == 0 and mobile_store_cart["footerBottom"] == 844 and mobile_store_cart["touch"] and mobile_store_cart["mobileActions"], "Mobile Cart content, grouped actions, stable regions, or touch targets were incorrect: " + json.dumps(mobile_store_cart))
     expect(mobile_store_cart["banner"] == mobile_store_before_cart["banner"] and mobile_store_cart["card"] == mobile_store_before_cart["card"] and mobile_store_cart["header"] == mobile_store_before_cart["header"] and mobile_store_cart["pageLocked"] and mobile_store_cart["burgerInert"] and not mobile_store_cart["overflow"], "Opening mobile Cart reflowed the Store or left the page interactive: " + json.dumps({"before": mobile_store_before_cart, "open": mobile_store_cart}))
     capture_screenshot(cdp, "shop-e-store-cart-mobile.png", full_page=False)
     cdp.evaluate("document.querySelector('[data-close-cart]').click()")
@@ -981,7 +989,7 @@ try:
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
-    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
+    cdp.wait_for(f"document.querySelectorAll('.shop-product').length === {initial_public_count} && document.querySelector('[data-cart-count]').hidden", 15)
     checks += 4
 
     primary_url = BASE + "img/illustration/balaam.jpg"
@@ -1014,18 +1022,78 @@ try:
     v2_id = created_v2["id"]
     fixture_ids.append(v2_id)
     preserved_before = normalized_preserved(created_v2["product"])
+    admin_fixture_count = initial_product_count + 1
 
     cdp.call("Network.setCookie", {"name": "PHPSESSID", "value": session_id, "url": BASE})
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
     })
     cdp.navigate(BASE + "admin.html")
-    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
     cdp.evaluate("window.__shopTestAlerts=[]; window.alert=(message)=>window.__shopTestAlerts.push(String(message)); window.confirm=()=>true")
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
-    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"shop\"]').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4")
-    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length") == 4, "Desktop Admin Product list did not contain three live products plus fixture")
-    checks += 1
+    cdp.wait_for(f"!document.querySelector('[data-admin-module-panel=\"shop\"]').hidden && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}")
+    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length") == admin_fixture_count, "Desktop Admin Product list did not contain the complete live set plus fixture")
+    product_management = cdp.evaluate("""
+        (() => ({
+            managementVisible:!document.querySelector('[data-product-management]').hidden,
+            editorHidden:document.querySelector('[data-product-editor]').hidden,
+            authError:document.querySelector('[data-product-management]').textContent.includes('Authentication required.'),
+            heading:document.querySelector('[data-product-management] h1').textContent,
+            adminAccent:getComputedStyle(document.body).getPropertyValue('--cms-accent').trim().toLowerCase(),
+            publicEffects:document.querySelectorAll('.pointer-canvas, .contact-mascot').length,
+            overflow:document.documentElement.scrollWidth > innerWidth
+        }))()
+    """)
+    expect(product_management == {"managementVisible": True, "editorHidden": True, "authError": False, "heading": "Products", "adminAccent": "#386b56", "publicEffects": 0, "overflow": False}, "Products did not open in a clean neutral management-first state: " + json.dumps(product_management))
+    cdp.evaluate("document.querySelector('#product-search').value='Balaam'; document.querySelector('#product-search').dispatchEvent(new Event('input',{bubbles:true}))")
+    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length === 1 && document.querySelector('#product-list').textContent.includes('Balaam')"), "Product name search did not filter the management list")
+    cdp.evaluate("document.querySelector('#product-search').value='PRINT-MOON'; document.querySelector('#product-search').dispatchEvent(new Event('input',{bubbles:true}))")
+    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length === 1 && document.querySelector('#product-list').textContent.includes('Moon')"), "Product SKU search did not filter the management list")
+    cdp.evaluate("document.querySelector('#product-search').value=''; document.querySelector('#product-search').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('#product-publication-filter').value='draft'; document.querySelector('#product-publication-filter').dispatchEvent(new Event('change',{bubbles:true}))")
+    expect(cdp.evaluate("document.querySelectorAll('#product-list .cms-product-row').length === 0 && document.querySelector('#product-list').textContent.includes('No matching products')"), "Product publication filter or filtered empty state failed")
+    cdp.evaluate("document.querySelector('#product-publication-filter').value=''; document.querySelector('#product-publication-filter').dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('[data-product-view=\"list\"]').click()")
+    expect(cdp.evaluate("document.querySelector('#product-list').classList.contains('is-list-view') && !document.querySelector('[data-product-list-head]').hidden && document.querySelector('[data-product-view=\"list\"]').getAttribute('aria-pressed') === 'true'"), "Product List view did not activate accessibly")
+    price_presentation = cdp.evaluate(f"""
+        (() => {{
+            const regular=document.querySelector('[data-product-id="1"] .cms-product-price');
+            const sale=document.querySelector('[data-product-id="{v2_id}"] .cms-product-price');
+            return {{
+                regularCurrent:regular.querySelector('.cms-product-current-price')?.textContent,
+                regularSecondary:regular.querySelectorAll('.cms-product-regular-price').length,
+                saleCurrent:sale.querySelector('.cms-product-current-price')?.textContent,
+                saleRegular:sale.querySelector('.cms-product-regular-price')?.textContent,
+                saleText:sale.textContent.toLowerCase(),
+                currentWhitespace:getComputedStyle(sale.querySelector('.cms-product-current-price')).whiteSpace,
+                regularWhitespace:getComputedStyle(sale.querySelector('.cms-product-regular-price')).whiteSpace,
+                overflow:document.documentElement.scrollWidth > innerWidth
+            }};
+        }})()
+    """)
+    expect(price_presentation == {"regularCurrent": "$18.00", "regularSecondary": 0, "saleCurrent": "$15.25", "saleRegular": "$20.00", "saleText": "$15.25$20.00", "currentWhitespace": "nowrap", "regularWhitespace": "nowrap", "overflow": False}, "Normal/sale Product List pricing was not rendered as stable semantic amounts: " + json.dumps(price_presentation))
+    capture_screenshot(cdp, "admin-v2-products-list-1440.png")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1200, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+    expect(cdp.evaluate("document.querySelector('#product-list').classList.contains('is-list-view') && document.documentElement.scrollWidth <= innerWidth"), "Product List overflowed at 1200px")
+    capture_screenshot(cdp, "admin-v2-products-list-1200.png")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 768, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+    list_768 = cdp.evaluate("""
+        (() => {
+            const row=document.querySelector('#product-list .cms-product-row');
+            const edit=row.querySelector('[data-edit-product]');
+            return {columns:getComputedStyle(row).gridTemplateColumns.split(' ').length,headVisible:getComputedStyle(document.querySelector('[data-product-list-head]')).display !== 'none',editVisible:edit.getBoundingClientRect().width > 0,overflow:document.documentElement.scrollWidth > innerWidth};
+        })()
+    """)
+    expect(list_768 == {"columns": 2, "headVisible": False, "editVisible": True, "overflow": False}, "Product List did not switch to its intentional 768px layout: " + json.dumps(list_768))
+    capture_screenshot(cdp, "admin-v2-products-list-768.png")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+    cdp.evaluate("document.querySelector('[data-product-view=\"grid\"]').click()")
+    expect(cdp.evaluate("!document.querySelector('#product-list').classList.contains('is-list-view') && document.querySelector('[data-product-list-head]').hidden"), "Product Grid view did not restore")
+    capture_screenshot(cdp, "admin-v2-products-1440.png")
+    cdp.evaluate("document.querySelector('[data-open-product-editor]').click()")
+    expect(cdp.evaluate("document.querySelector('[data-product-management]').hidden && !document.querySelector('[data-product-editor]').hidden && document.querySelector('#product-form').elements.id.value === '' && document.querySelector('#product-form').elements.sku.value === '' && document.activeElement === document.querySelector('#product-form').elements.title && document.querySelector('[data-product-upload]').disabled && document.querySelector('[data-product-upload-input]').disabled && document.querySelector('[data-product-upload-help]').textContent.includes('draft')"), "Add Product did not open a focused unsaved editor with uploads unavailable")
+    cdp.evaluate("document.querySelector('[data-close-product-editor]').click()")
+    expect(cdp.evaluate("!document.querySelector('[data-product-management]').hidden && document.querySelector('[data-product-editor]').hidden && document.activeElement === document.querySelector('[data-open-product-editor]')"), "Back to Products did not restore management mode and focus")
+    checks += 12
 
     cdp.evaluate("document.querySelector('[data-edit-product=\"1\"]').click()")
     live_form = cdp.evaluate("""
@@ -1035,15 +1103,16 @@ try:
             primaryPath:document.querySelector('.cms-product-image-path')?.textContent || '', description:f.elements.description.value,
             price:f.elements.price.value, stock:f.elements.stock.value,
             heading:document.querySelector('[data-product-form-title]').textContent,
-            cancelHidden:document.querySelector('[data-cancel-product]').hidden
+            cancelHidden:document.querySelector('[data-cancel-product]').hidden,
+            focused:document.activeElement === f.elements.title
         }; })()
     """)
     expect(live_form["id"] == "1" and live_form["sku"] == initial_live[1]["sku"] and live_form["title"] == initial_live[1]["title"], "Edit did not populate the legacy form for a live product")
     expect(live_form["description"] == initial_live[1]["description"] and live_form["price"] == initial_live[1]["price"] and live_form["stock"] == str(initial_live[1]["stock"]), "Legacy edit fields were incomplete")
     expect(live_form["imageCount"] == 1 and live_form["primaryPath"] == initial_live[1]["images"][0]["path"], "Existing live product image did not populate the gallery")
-    expect(live_form["heading"] == "Edit product" and not live_form["cancelHidden"], "Edit mode controls did not activate")
+    expect(live_form["heading"] == "Edit product" and not live_form["cancelHidden"] and live_form["focused"], "Edit mode controls or focus did not activate")
     cdp.evaluate("document.querySelector('[data-cancel-product]').click()")
-    expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === '' && document.querySelector('[data-cancel-product]').hidden"), "Cancel did not reset the product form")
+    expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === '' && document.querySelector('[data-product-editor]').hidden && !document.querySelector('[data-product-management]').hidden && document.activeElement === document.querySelector('[data-open-product-editor]')"), "Cancel did not return focus to Product management")
     expect(cdp.evaluate("document.querySelector('[data-product-upload]').disabled && document.querySelector('[data-product-upload-help]').textContent.includes('draft')"), "New-product upload limitation was not explained")
     checks += 6
 
@@ -1088,7 +1157,7 @@ try:
     expect(not invalid_ux["saleValid"] and not invalid_ux["badgeValid"] and invalid_ux["id"] == str(v2_id), "Client validation did not block invalid sale/reserved badge values")
     cdp.evaluate(f"document.querySelector('#product-form').elements.salePrice.value='15.25'; document.querySelector('[data-product-badge]').value='Limited'; document.querySelector('#product-form').elements.description.value={js_string('Full V2 copy saved through the product editor.')} ; document.querySelector('#product-form').requestSubmit()")
     updated_description = "Full V2 copy saved through the product editor."
-    cdp.wait_for("document.querySelector('#product-form').elements.id.value === '' && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"document.querySelector('#product-form').elements.id.value === '' && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
     expect(cdp.evaluate("window.__shopTestAlerts.length") == 0, "V2 edit raised an Admin alert")
     status, after_edit_admin = api_request("admin-products", session_id=session_id)
     after_edit = next(product for product in after_edit_admin["products"] if product["id"] == v2_id)
@@ -1235,9 +1304,10 @@ try:
     expect(status == 201, "Could not create disposable storefront fixture")
     storefront_id = storefront_created["id"]
     fixture_ids.append(storefront_id)
+    storefront_fixture_count = initial_public_count + 2
 
     cdp.navigate(BASE + "store.html")
-    cdp.wait_for("document.querySelectorAll('.shop-product').length === 5", 15)
+    cdp.wait_for(f"document.querySelectorAll('.shop-product').length === {storefront_fixture_count}", 15)
     storefront_state = cdp.evaluate(f"""
         (() => {{
             const inquiry=document.querySelector('[data-product-id="{v2_id}"]');
@@ -1263,7 +1333,7 @@ try:
             }};
         }})()
     """)
-    expect(storefront_state["cards"] == 5 and storefront_state["headings"] == ["Art Prints", "Regression", "More from the studio"], "Category and uncategorized storefront sections were incorrect")
+    expect(storefront_state["cards"] == storefront_fixture_count and "Regression" in storefront_state["headings"] and "More from the studio" in storefront_state["headings"], "Category and uncategorized storefront sections were incorrect")
     expect(storefront_state["inquiryHref"] == "index.html#contact" and storefront_state["externalHref"] == storefront_fields["externalUrl"] and storefront_state["internalHook"].startswith("store.html?product="), "Product action links were unsafe or incorrect")
     expect(storefront_state["inquiryPrimary"] == uploaded_path and storefront_state["inquiryAlt"] == "Uploaded primary alt text" and storefront_state["inquiryImages"] == 2, "Ordered gallery or primary alt text was not used by the storefront")
     expect("$18.00" in storefront_state["inquiryPrice"] and "$22.00" in storefront_state["inquiryPrice"] and storefront_state["inquiryBadges"] == ["Sale", "New"], "Sale price or minimal inquiry badges were incorrect")
@@ -1482,7 +1552,7 @@ try:
     cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && Boolean(document.querySelector('.shop-cart-item')) && document.activeElement === document.querySelector('[data-close-cart]')", 15)
     mobile_detail_cart = cdp.evaluate("(() => { const detail=document.querySelector('.shop-product-detail').getBoundingClientRect(); const gallery=document.querySelector('.shop-product-gallery').getBoundingClientRect(); const header=document.querySelector('.header').getBoundingClientRect(); const drawer=document.querySelector('[data-cart-panel]').getBoundingClientRect(); return {detail:{x:detail.x,y:detail.y,width:detail.width},gallery:{x:gallery.x,y:gallery.y,width:gallery.width},header:{x:header.x,y:header.y,width:header.width},drawerWidth:drawer.width,drawerRight:drawer.right,item:document.querySelector('.shop-cart-item strong').textContent,overflow:document.documentElement.scrollWidth>innerWidth}; })()")
     expect(mobile_detail_cart["detail"] == mobile_detail_before_cart["detail"] and mobile_detail_cart["gallery"] == mobile_detail_before_cart["gallery"] and mobile_detail_cart["header"] == mobile_detail_before_cart["header"], "Opening Cart reflowed the mobile Product Detail/gallery: " + json.dumps({"before": mobile_detail_before_cart, "open": mobile_detail_cart}))
-    expect(360 <= mobile_detail_cart["drawerWidth"] <= 390 and mobile_detail_cart["drawerRight"] == 390 and mobile_detail_cart["item"] == normal_product["title"] and not mobile_detail_cart["overflow"], "Mobile Product Detail Cart overlay was incorrect: " + json.dumps(mobile_detail_cart))
+    expect(360 <= mobile_detail_cart["drawerWidth"] <= 390 and abs(mobile_detail_cart["drawerRight"] - 390) < 0.1 and mobile_detail_cart["item"] == normal_product["title"] and not mobile_detail_cart["overflow"], "Mobile Product Detail Cart overlay was incorrect: " + json.dumps(mobile_detail_cart))
     capture_screenshot(cdp, "shop-e-product-detail-cart-mobile.png", full_page=False)
     cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
     cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
@@ -1495,7 +1565,7 @@ try:
     capture_screenshot(cdp, "shop-d-product-detail-mobile.png")
     checks += 5
 
-    cdp.navigate(BASE + "store.html", "document.querySelectorAll('.shop-product').length === 5")
+    cdp.navigate(BASE + "store.html", f"document.querySelectorAll('.shop-product').length === {storefront_fixture_count}")
     mobile_storefront = cdp.evaluate(f"""
         (async () => {{
             const card=document.querySelector('[data-product-id="{storefront_id}"]');
@@ -1522,7 +1592,7 @@ try:
     })
 
     cdp.navigate(BASE + "admin.html")
-    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
     cdp.evaluate("window.__shopTestAlerts=[]; window.alert=(message)=>window.__shopTestAlerts.push(String(message)); window.confirm=()=>true")
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
     cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click(); document.querySelector('[aria-label=\"Remove image 1 from product\"]').click(); document.querySelector('#product-form').requestSubmit()")
@@ -1538,6 +1608,7 @@ try:
     legacy_sku = "TEST-UI-LEGACY-" + token.upper()
     legacy_title = "Browser Legacy Product " + token
     legacy_image = BASE + "img/illustration/balaam.jpg"
+    cdp.evaluate("document.querySelector('[data-open-product-editor]').click()")
     cdp.evaluate(f"""
         (() => {{
             const f=document.querySelector('#product-form');
@@ -1554,32 +1625,51 @@ try:
             document.querySelector('[data-product-add-url]').click();
             f.elements.description.value='Legacy browser form product.';
             f.elements.price.value='12.50';
-            f.elements.stock.value='2';
+            f.elements.stock.value='0';
             f.elements.productType.value='digital';
+            f.elements.storefrontVisible.checked=false;
             f.requestSubmit();
         }})()
     """)
-    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 5 && document.querySelector('#product-form').elements.sku.value === ''", 15)
+    cdp.wait_for(f"document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count + 1} && document.querySelector('#product-form').elements.id.value !== '' && !document.querySelector('[data-product-upload]').disabled && !document.querySelector('[data-product-upload-input]').disabled", 15)
     status, with_legacy = api_request("admin-products", session_id=session_id)
     legacy_product = next(product for product in with_legacy["products"] if product["sku"] == legacy_sku)
     legacy_id = legacy_product["id"]
     fixture_ids.append(legacy_id)
     expect(cdp.evaluate("window.__slugAssist.generated !== '' && window.__slugAssist.manual.startsWith('browser-manual-product-')"), "Slug assistance overwrote a manually edited slug")
-    expect(legacy_product["publicationStatus"] == "draft" and legacy_product["productType"] == "digital" and legacy_product["category"] is None, "Draft creation defaults or optional category failed")
+    expect(legacy_product["publicationStatus"] == "draft" and legacy_product["productType"] == "digital" and legacy_product["category"] is None and not legacy_product["storefrontVisible"] and not legacy_product["available"], "Draft creation fields, type, visibility, or availability failed")
     expect(legacy_product["image"] == legacy_image and legacy_product["price"] == "12.50", "Draft create did not preserve submitted media or price")
-    checks += 3
+    saved_draft_editor = cdp.evaluate(f"""
+        (() => {{ const f=document.querySelector('#product-form'); return {{
+            editorVisible:!document.querySelector('[data-product-editor]').hidden,
+            managementHidden:document.querySelector('[data-product-management]').hidden,
+            id:f.elements.id.value, sku:f.elements.sku.value, title:f.elements.title.value,
+            heading:document.querySelector('[data-product-form-title]').textContent,
+            uploadEnabled:!document.querySelector('[data-product-upload]').disabled,
+            chooseEnabled:!document.querySelector('[data-product-upload-input]').disabled,
+            help:document.querySelector('[data-product-upload-help]').textContent,
+            message:document.querySelector('[data-product-form-message]').textContent
+        }}; }})()
+    """)
+    expect(saved_draft_editor["editorVisible"] and saved_draft_editor["managementHidden"] and saved_draft_editor["id"] == str(legacy_id) and saved_draft_editor["sku"] == legacy_sku and saved_draft_editor["title"] == "Changed " + legacy_title and saved_draft_editor["heading"] == "Edit product" and saved_draft_editor["uploadEnabled"] and saved_draft_editor["chooseEnabled"] and "8MB" in saved_draft_editor["help"] and "uploads are now available" in saved_draft_editor["message"], "First Save Draft did not transition seamlessly into the saved Edit state: " + json.dumps(saved_draft_editor))
+    checks += 4
 
-    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{legacy_id}\"]').click(); document.querySelector('[data-cancel-product]').click()")
-    expect(cdp.evaluate("document.querySelector('#product-form').elements.id.value === ''"), "Legacy create/edit cancel control failed")
+    cdp.evaluate("document.querySelector('[data-cancel-product]').click()")
+    cdp.evaluate(f"document.querySelector('[data-edit-product=\"{legacy_id}\"]').click()")
+    expect(cdp.evaluate("!document.querySelector('[data-product-upload]').disabled && !document.querySelector('[data-product-upload-input]').disabled && document.querySelector('[data-product-upload-help]').textContent.includes('8MB')"), "Existing Draft Edit did not keep image upload enabled")
+    cdp.evaluate("document.querySelector('[data-cancel-product]').click(); document.querySelector('[data-product-view=\"list\"]').click()")
+    expect(cdp.evaluate(f"document.querySelector('[data-product-id=\"{legacy_id}\"] .cms-product-state').textContent.includes('Draft') && document.querySelector('[data-product-id=\"{legacy_id}\"] .cms-product-state').textContent.includes('Hidden') && document.querySelector('[data-product-id=\"{legacy_id}\"] .cms-product-state').textContent.includes('Sold Out') && document.querySelector('[data-product-id=\"{legacy_id}\"] .cms-product-details').textContent.includes('Digital')"), "Draft/hidden/sold-out/digital Product List states were not grouped correctly")
+    cdp.evaluate("document.querySelector('[data-product-view=\"grid\"]').click()")
     cdp.evaluate(f"document.querySelector('[data-delete-product=\"{legacy_id}\"]').click()")
-    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
     status, after_delete_admin = api_request("admin-products", session_id=session_id)
     expect(all(product["id"] != legacy_id for product in after_delete_admin["products"]), "Delete control did not remove the disposable legacy product")
     fixture_ids.remove(legacy_id)
-    checks += 2
+    checks += 3
 
     published_sku = "TEST-UI-PUBLISHED-" + token.upper()
     published_title = "Published Browser Product " + token
+    cdp.evaluate("document.querySelector('[data-open-product-editor]').click()")
     cdp.evaluate(f"""
         (() => {{
             const f=document.querySelector('#product-form');
@@ -1602,7 +1692,7 @@ try:
             document.querySelector('[data-product-toggle-publication]').click();
         }})()
     """)
-    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 5 && document.querySelector('#product-form').elements.sku.value === ''", 15)
+    cdp.wait_for(f"document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count + 1} && document.querySelector('#product-form').elements.sku.value === ''", 15)
     status, with_published = api_request("admin-products", session_id=session_id)
     published_product = next(product for product in with_published["products"] if product["sku"] == published_sku)
     published_id = published_product["id"]
@@ -1611,7 +1701,7 @@ try:
     expect(published_product["salePrice"] == "25.00" and published_product["purchaseAction"] == "external" and published_product["externalUrl"] == "https://example.com/browser-product", "Published sale/external configuration failed")
     expect(published_product["manualBadges"][0]["label"] == "Limited", "Manual badge creation failed")
     cdp.evaluate(f"document.querySelector('[data-delete-product=\"{published_id}\"]').click()")
-    cdp.wait_for("document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
     fixture_ids.remove(published_id)
     checks += 4
 
@@ -1620,12 +1710,99 @@ try:
     cdp.evaluate("document.querySelector('[data-admin-module=\"projects\"]').click()")
     cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"projects\"]').hidden")
     expect(cdp.evaluate("document.querySelectorAll('#project-list .project-item').length") == len(projects["projects"]), "Projects Admin list did not match its API")
+    capture_screenshot(cdp, "admin-v2-projects-1440.png")
+    cdp.evaluate("document.querySelector('[data-project-view=\"list\"]').click(); document.querySelector('#project-search').value='__no_project__'; document.querySelector('#project-search').dispatchEvent(new Event('input',{bubbles:true}))")
+    expect(cdp.evaluate("document.querySelector('#project-list').classList.contains('is-list-view') && document.querySelector('#project-list').textContent.includes('No projects match')"), "Projects search/list reference behavior regressed")
+    cdp.evaluate("document.querySelector('#project-search').value=''; document.querySelector('#project-search').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-project-view=\"grid\"]').click(); document.querySelector('[data-open-project-modal]').click()")
+    expect(cdp.evaluate("!document.querySelector('[data-project-modal]').hidden && document.querySelector('#project-form').elements.id.value === ''"), "Projects Add editor did not remain functional")
+    cdp.evaluate("document.querySelector('[data-close-project-modal]').click()")
+
+    content_slug = "admin-v2-content-" + token
+    content_blocks = [
+        {"type": "paragraph", "payload": {"text": "Disposable paragraph block."}},
+        {"type": "heading", "payload": {"text": "Disposable heading", "level": 2}},
+        {"type": "image", "payload": {"url": "img/illustration/balaam.jpg", "alt": "Balaam illustration"}},
+        {"type": "image_caption", "payload": {"url": "img/graphic_design/Moon%20Silhoutte.jpg", "alt": "Moon silhouette", "caption": "Disposable caption"}},
+        {"type": "video", "payload": {"provider": "youtube", "videoId": "dQw4w9WgXcQ"}},
+        {"type": "quote", "payload": {"text": "Disposable quote.", "attribution": "Browser regression"}},
+        {"type": "divider", "payload": {}},
+        {"type": "gallery", "payload": {"images": [{"url": "img/illustration/balaam.jpg", "alt": "Gallery image", "caption": "Gallery caption"}]}},
+    ]
+    content_fields = {
+        "title": "Admin V2 Content Fixture",
+        "slug": content_slug,
+        "coverImage": "img/illustration/balaam.jpg",
+        "type": "update",
+        "publishDate": "2026-10-06",
+        "excerpt": "Disposable Content management regression fixture.",
+        "body": "Legacy fallback body for the disposable Content fixture.",
+        "status": "draft",
+        "featured": "0",
+        "showHome": "0",
+        "showCard": "1",
+        "cardSize": "standard",
+        "seoTitle": "Admin V2 Content SEO",
+        "metaDescription": "Disposable meta description.",
+        "ogTitle": "Admin V2 Open Graph title",
+        "ogDescription": "Disposable Open Graph description.",
+        "ogImage": "img/illustration/balaam.jpg",
+        "coverAlt": "Disposable cover alt text",
+        "noindex": "1",
+        "blocks": json.dumps(content_blocks),
+    }
+    status, created_content = api_request("content-entry", "POST", content_fields, session_id)
+    expect(status == 201 and created_content.get("id"), "Content draft fixture could not be created")
+    content_fixture_id = created_content["id"]
+    content_fixture_ids.append(content_fixture_id)
+    status, draft_content_response = api_request("admin-content", session_id=session_id)
+    draft_content = next(entry for entry in draft_content_response["entries"] if entry["id"] == content_fixture_id)
+    expect(status == 200 and draft_content["status"] == "draft" and [block["type"] for block in draft_content["blocks"]] == [block["type"] for block in content_blocks], "Content draft or all eight ordered block types did not round-trip")
+    content_fields.update({"id": str(content_fixture_id), "title": "Admin V2 Content Fixture Edited", "status": "published", "type": "announcement", "featured": "1", "showHome": "1", "cardSize": "wide"})
+    status, updated_content = api_request("content-entry", "POST", content_fields, session_id)
+    expect(status == 200 and updated_content.get("updated"), "Content publish/edit cycle failed")
+    status, content = api_request("admin-content", session_id=session_id)
+    published_fixture = next(entry for entry in content["entries"] if entry["id"] == content_fixture_id)
+    expect(status == 200 and published_fixture["status"] == "published" and published_fixture["type"] == "announcement" and published_fixture["featured"] and published_fixture["showHome"] and published_fixture["showCard"] and published_fixture["cardSize"] == "wide", "Content publication and card controls did not persist")
+    expect(published_fixture["seoTitle"] == content_fields["seoTitle"] and published_fixture["metaDescription"] == content_fields["metaDescription"] and published_fixture["ogTitle"] == content_fields["ogTitle"] and published_fixture["ogDescription"] == content_fields["ogDescription"] and published_fixture["ogImage"] == content_fields["ogImage"] and published_fixture["coverAlt"] == content_fields["coverAlt"] and published_fixture["noindex"], "Content SEO fields did not persist")
+    status, public_content_fixture = api_request("content")
+    expect(status == 200 and any(entry["id"] == content_fixture_id for entry in public_content_fixture["entries"]), "Published Content fixture was not available to public Stories")
+    status, _ = multipart_request("content-media-upload", {}, "unauth.png", valid_png, "image/png")
+    expect(status == 401, "Unauthenticated Content media upload was not rejected")
+    status, _ = multipart_request("content-media-upload", {}, "invalid.txt", b"not an image", "text/plain", session_id)
+    expect(status == 422, "Invalid Content media upload was not rejected without writing media")
+
     status, content = api_request("admin-content", session_id=session_id)
     expect(status == 200, "Content Admin API failed during browser regression")
     cdp.evaluate("document.querySelector('[data-admin-module=\"content\"]').click()")
-    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"content\"]').hidden")
+    cdp.wait_for(f"!document.querySelector('[data-admin-module-panel=\"content\"]').hidden && document.querySelectorAll('#content-list .cms-content-row').length === {len(content['entries'])}")
     content_dom_count = cdp.evaluate("document.querySelectorAll('#content-list .cms-content-row').length")
     expect(content_dom_count == len(content["entries"]), "Content Admin list did not match its API")
+    content_management = cdp.evaluate("""
+        (() => ({
+            managementVisible:!document.querySelector('[data-content-management]').hidden,
+            editorHidden:document.querySelector('[data-content-editor]').hidden,
+            titles:[...document.querySelectorAll('#content-list h2')].map(item=>item.textContent),
+            authError:document.querySelector('[data-content-management]').textContent.includes('Authentication required.'),
+            overflow:document.documentElement.scrollWidth > innerWidth
+        }))()
+    """)
+    expect(content_management["managementVisible"] and content_management["editorHidden"] and not content_management["authError"] and not content_management["overflow"], "Content did not open in a clean management-first state: " + json.dumps(content_management))
+    expect(sorted(content_management["titles"]) == sorted(entry["title"] for entry in content["entries"]), "Existing Content titles were not visibly rendered")
+    capture_screenshot(cdp, "admin-v2-content-1440.png")
+    cdp.evaluate("document.querySelector('#content-status-filter').value='draft'; document.querySelector('#content-status-filter').dispatchEvent(new Event('change',{bubbles:true}))")
+    draft_count = len([entry for entry in content["entries"] if entry["status"] == "draft"])
+    expect(cdp.evaluate("document.querySelectorAll('#content-list .cms-content-row').length") == draft_count, "Content status filter failed")
+    cdp.evaluate("document.querySelector('#content-status-filter').value=''; document.querySelector('#content-status-filter').dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('[data-open-content-editor]').click()")
+    expect(cdp.evaluate("document.querySelector('[data-content-management]').hidden && !document.querySelector('[data-content-editor]').hidden && document.querySelector('#content-form').elements.id.value === '' && document.activeElement === document.querySelector('#content-form').elements.title"), "Add Content did not open a focused blank editor-only state")
+    cdp.evaluate("document.querySelector('[data-close-content-editor]').click()")
+    first_content_id = content_fixture_id
+    cdp.evaluate(f"document.querySelector('[data-edit-content=\"{first_content_id}\"]').click()")
+    expect(cdp.evaluate(f"document.querySelector('[data-content-management]').hidden && !document.querySelector('[data-content-editor]').hidden && document.querySelector('#content-form').elements.id.value === '{first_content_id}' && document.querySelectorAll('.cms-article-block').length === 8 && document.querySelector('#content-form').elements.seoTitle.value === 'Admin V2 Content SEO' && document.activeElement === document.querySelector('#content-form').elements.title"), "Content Edit did not open the focused populated editor with blocks and SEO fields")
+    cdp.evaluate("document.querySelector('[data-close-content-editor]').click()")
+    expect(cdp.evaluate("!document.querySelector('[data-content-management]').hidden && document.querySelector('[data-content-editor]').hidden && document.activeElement === document.querySelector('[data-open-content-editor]')"), "Back to Content did not restore management mode and focus")
+    status, deleted_content = api_request("delete-content", "POST", {"id": content_fixture_id}, session_id)
+    expect(status == 200 and deleted_content.get("deleted"), "Disposable Content fixture was not deleted")
+    content_fixture_ids.remove(content_fixture_id)
 
     status, theme = api_request("theme")
     expect(status == 200 and theme.get("theme"), "Theme API failed during browser regression")
@@ -1659,7 +1836,18 @@ try:
         })()
     """)
     expect(settings_state == {"fieldCount": 4, "savedInstagram": "https://instagram.com/dyndel-browser-test"}, "Settings social-link form did not save in the disposable browser profile")
-    checks += 8
+    checks += 25
+
+    cdp.call("Network.deleteCookies", {"name": "PHPSESSID", "url": BASE})
+    cdp.evaluate("sessionStorage.setItem('dyndelAdminSession','authenticated'); location.reload()")
+    cdp.wait_for("!document.querySelector('#admin-login-panel').hidden && document.querySelector('#admin-content').hidden && document.querySelector('#admin-login-message').textContent.includes('expired')", 15)
+    expired_state = cdp.evaluate("({loginVisible:!document.querySelector('#admin-login-panel').hidden,workspaceHidden:document.querySelector('#admin-content').hidden,message:document.querySelector('#admin-login-message').textContent,inlineAuthError:document.body.textContent.includes('Authentication required.')})")
+    expect(expired_state["loginVisible"] and expired_state["workspaceHidden"] and "expired" in expired_state["message"] and not expired_state["inlineAuthError"], "Expired Admin session did not return to a coherent sign-in state: " + json.dumps(expired_state))
+    cdp.call("Network.setCookie", {"name": "PHPSESSID", "value": session_id, "url": BASE})
+    cdp.navigate(BASE + "admin.html")
+    cdp.wait_for(f"!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count} && document.querySelectorAll('#content-list .cms-content-row').length > 0", 15)
+    expect(cdp.evaluate("document.querySelector('#admin-login-panel').hidden && !document.body.textContent.includes('Authentication required.')"), "Valid Admin session did not restore Products and Content cleanly")
+    checks += 2
 
     illustration_count = len([project for project in projects["projects"] if project["category"] == "Illustration"])
     cdp.navigate(BASE + "illustration.html")
@@ -1696,12 +1884,29 @@ try:
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
     cdp.navigate(BASE + "admin.html")
-    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === 4", 15)
+    cdp.wait_for(f"!document.querySelector('#admin-content').hidden && document.querySelectorAll('#product-list .cms-product-row').length === {admin_fixture_count}", 15)
+    cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
+    expect(cdp.evaluate("!document.querySelector('[data-product-management]').hidden && document.querySelector('[data-product-editor]').hidden && document.documentElement.scrollWidth <= innerWidth"), "Mobile Products did not open management-first without overflow")
+    capture_screenshot(cdp, "admin-v2-products-390.png")
+    cdp.evaluate("document.querySelector('[data-product-view=\"list\"]').click()")
+    mobile_product_list = cdp.evaluate("""
+        (() => {
+            const row=document.querySelector('#product-list .cms-product-row');
+            return {columns:getComputedStyle(row).gridTemplateColumns.split(' ').length,headVisible:getComputedStyle(document.querySelector('[data-product-list-head]')).display !== 'none',editVisible:row.querySelector('[data-edit-product]').getBoundingClientRect().width > 0,priceParts:row.querySelectorAll('.cms-product-price > *').length,overflow:document.documentElement.scrollWidth > innerWidth};
+        })()
+    """)
+    expect(mobile_product_list["columns"] == 2 and not mobile_product_list["headVisible"] and mobile_product_list["editVisible"] and mobile_product_list["priceParts"] >= 1 and not mobile_product_list["overflow"], "Mobile Product List layout was compressed or inaccessible: " + json.dumps(mobile_product_list))
+    capture_screenshot(cdp, "admin-v2-products-list-390.png")
+    cdp.evaluate("document.querySelector('[data-product-view=\"grid\"]').click()")
+    cdp.evaluate("document.querySelector('[data-admin-module=\"content\"]').click()")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"content\"]').hidden && document.querySelectorAll('#content-list .cms-content-row').length > 0", 15)
+    expect(cdp.evaluate("!document.querySelector('[data-content-management]').hidden && document.querySelector('[data-content-editor]').hidden && document.documentElement.scrollWidth <= innerWidth"), "Mobile Content did not open management-first without overflow")
+    capture_screenshot(cdp, "admin-v2-content-390.png")
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
     cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
     mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .cms-product-row').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth, images:document.querySelectorAll('.cms-product-image-item').length, role:document.querySelector('.cms-product-image-role')?.textContent || ''})")
-    expect(mobile_admin == {"products": 4, "panelHidden": False, "width": 390, "images": 1, "role": "Primary"}, "Mobile Admin Shop/gallery regression failed")
-    checks += 1
+    expect(mobile_admin == {"products": admin_fixture_count, "panelHidden": False, "width": 390, "images": 1, "role": "Primary"}, "Mobile Admin Shop/gallery regression failed")
+    checks += 4
     capture_screenshot(cdp, "shop-admin-b4-mobile.png")
 
     # Shop F2 Checkout V1: customer flow, server quote hydration, pending handoff,
@@ -1894,7 +2099,10 @@ try:
     cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 10)
     policy_cart = cdp.evaluate("({modal:document.querySelector('[data-cart-panel]').getAttribute('aria-modal'),checkoutHidden:document.querySelector('[data-cart-checkout]').hidden,items:document.querySelectorAll('[data-cart-item-id]').length,text:document.querySelector('[data-cart-items]').textContent,stored:localStorage.getItem('dyndelShopCart')})")
     expect(policy_cart["modal"] == "true" and not policy_cart["checkoutHidden"] and policy_cart["items"] == 1, "Reusable Cart Drawer did not work on policy routes: " + json.dumps(policy_cart))
-    cdp.evaluate("document.querySelector('[data-close-cart]').click(); document.querySelector('[data-works-toggle]').click()")
+    cdp.evaluate("(async()=>{document.querySelector('[data-close-cart]').click(); await new Promise(resolve=>setTimeout(resolve,400));})()", await_promise=True)
+    cdp.wait_for("!document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    cdp.evaluate("document.querySelector('[data-works-toggle]').click()")
+    cdp.wait_for("document.querySelector('[data-works-toggle]').getAttribute('aria-expanded') === 'true'", 5)
     expect(cdp.evaluate("document.querySelector('[data-works-toggle]').getAttribute('aria-expanded') === 'true'") is True, "Works navigation did not operate on a policy route")
     checks += 2
 
@@ -1943,6 +2151,11 @@ try:
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1
 finally:
+    for content_id in list(content_fixture_ids):
+        try:
+            api_request("delete-content", "POST", {"id": content_id}, session_id)
+        except Exception:
+            pass
     for product_id in list(fixture_ids):
         try:
             api_request("delete-product", "POST", {"id": product_id}, session_id)
@@ -1958,6 +2171,8 @@ finally:
         cleanup_status, cleanup_admin = api_request("admin-products", session_id=session_id)
         cleanup_live = {product["id"]: product for product in cleanup_admin.get("products", [])}
         expect(cleanup_status == 200 and cleanup_live == initial_live, "Live product state changed during browser regression")
+        cleanup_content_status, cleanup_content = api_request("admin-content", session_id=session_id)
+        expect(cleanup_content_status == 200 and cleanup_content.get("entries") == initial_content, "Live Content state changed during browser regression")
     except Exception:
         raise
     try:

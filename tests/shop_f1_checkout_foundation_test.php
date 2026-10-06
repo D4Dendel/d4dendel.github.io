@@ -201,7 +201,8 @@ try {
     f1_expect($status === 200 && $duplicates['quote']['items'][0]['quantity'] === 3 && $duplicates['quote']['subtotal'] === '54.00', 'Duplicate Cart IDs were not aggregated authoritatively.');
     $checks++;
 
-    f1_expect((string)$pdo->query("SELECT GROUP_CONCAT(CONCAT(id, ':', stock) ORDER BY id) FROM shop_products WHERE id <= 3")->fetchColumn() === $before['stock'], 'Checkout quotes changed product stock.');
+    $fixtureIdList = implode(',', array_map('intval', $productIds));
+    f1_expect((string)$pdo->query("SELECT GROUP_CONCAT(CONCAT(id, ':', stock) ORDER BY id) FROM shop_products WHERE id NOT IN ({$fixtureIdList})")->fetchColumn() === $before['stock'], 'Checkout quotes changed product stock.');
     f1_expect((int)$pdo->query('SELECT COUNT(*) FROM shop_orders')->fetchColumn() === $before['orders'], 'Checkout quotes created an order.');
     f1_expect((int)$pdo->query('SELECT COUNT(*) FROM shop_order_items')->fetchColumn() === $before['items'], 'Checkout quotes created order items.');
     $checks += 3;
