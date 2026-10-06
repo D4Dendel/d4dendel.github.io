@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261006.shopd">
+    <link rel="stylesheet" href="css/style.css?v=20261006.shope3">
 </head>
 <body class="shop-page">
     <header class="header">
@@ -49,6 +49,25 @@
     </div>
 </header>
 
+    <div class="shop-cart-layer" data-cart-region hidden>
+        <div class="shop-cart-backdrop" data-cart-backdrop aria-hidden="true"></div>
+        <aside class="shop-cart" id="shop-cart-panel" data-cart-panel role="dialog" aria-modal="true" aria-labelledby="shop-cart-title" tabindex="-1">
+            <div class="shop-cart-header">
+                <div>
+                    <h2 id="shop-cart-title">Cart</h2>
+                    <p class="shop-cart-dialog-count" data-cart-dialog-count>Empty</p>
+                </div>
+                <button class="icon-button shop-cart-close" type="button" data-close-cart aria-label="Close cart">&times;</button>
+            </div>
+            <div class="shop-cart-items" data-cart-items aria-label="Cart items"></div>
+            <div class="shop-cart-footer">
+                <div class="shop-cart-total"><span>Subtotal</span><strong data-cart-total>$0.00</strong></div>
+                <p class="shop-cart-feedback" data-cart-feedback role="status" aria-live="polite"></p>
+                <button class="btn btn-secondary shop-cart-continue" type="button" data-continue-shopping>CONTINUE SHOPPING</button>
+            </div>
+        </aside>
+    </div>
+
     <section class="shop-banner" aria-labelledby="shop-title" data-shop-catalog-view>
         <div class="shop-banner-copy">
             <p class="eyebrow">Dyndel artist shop</p>
@@ -58,21 +77,6 @@
     </section>
 
     <main class="page-shell category-page">
-        <aside class="shop-cart-column" data-cart-region aria-label="Shopping cart" hidden>
-            <div class="shop-cart" id="shop-cart-panel" data-cart-panel hidden>
-                <div class="shop-cart-header"><h2>Your cart</h2><button class="icon-button" type="button" data-close-cart aria-label="Close cart">&times;</button></div>
-                <div data-cart-items></div>
-                <div class="shop-cart-total"><span>Total</span><strong data-cart-total>$0.00</strong></div>
-                <form class="shop-checkout-form" data-checkout-form>
-                    <h3>Checkout</h3>
-                    <label><span>Name</span><input name="customerName" required></label>
-                    <label><span>Email</span><input type="email" name="customerEmail" required></label>
-                    <label><span>Shipping address</span><textarea name="customerAddress" rows="3" required></textarea></label>
-                    <p class="shop-form-message" data-checkout-message role="status"></p>
-                    <button class="btn btn-primary" type="submit">Place order</button>
-                </form>
-            </div>
-        </aside>
         <section class="shop-layout" aria-label="Shop catalog" data-shop-catalog-view>
             <div class="shop-catalog" data-shop-products aria-live="polite"></div>
         </section>
@@ -90,6 +94,6 @@
         <p>© 2026 Dyndel Pino</p>
     </footer>
 
-    <script src="script.js?v=20261006.shopd"></script>
+    <script src="script.js?v=20261006.shope3"></script>
 </body>
 </html>

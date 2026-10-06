@@ -628,29 +628,150 @@ try:
     checks += 9
 
     first_product = initial_public_products[0]
+    second_product = initial_public_products[1]
     first_price = float(first_product["currentPrice"])
-    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:10}}])); location.reload()")
-    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '10'")
-    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
-    cdp.wait_for("!document.querySelector('[data-cart-region]').hidden && !document.querySelector('[data-cart-panel]').hidden")
-    cart_state = cdp.evaluate("""
+    second_price = float(second_product["currentPrice"])
+    cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
+    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
+    cdp.evaluate("scrollTo({top:120,left:0,behavior:'instant'})")
+    cdp.wait_for("document.querySelector('.header').classList.contains('is-compact')", 5)
+    cdp.evaluate("new Promise(resolve=>setTimeout(resolve,260))", await_promise=True)
+    cart_layout_before = cdp.evaluate("""
         (() => {
-            const panel=document.querySelector('[data-cart-panel]').getBoundingClientRect();
-            const catalog=document.querySelector('.shop-catalog').getBoundingClientRect();
-            const count=document.querySelector('[data-cart-count]');
-            const topItems=[...document.querySelectorAll('.nav-list > li')].map(item => item.querySelector(':scope > a, :scope > button'));
-            return {count:count.textContent, countHidden:count.hidden, total:document.querySelector('[data-cart-total]').textContent, item:document.querySelector('.shop-cart-item span').textContent, expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'), panelBeforeCatalog:panel.bottom <= catalog.top,navPositions:topItems.map(item => Math.round(item.getBoundingClientRect().left * 10) / 10)};
+            const banner=document.querySelector('.shop-banner').getBoundingClientRect();
+            const card=document.querySelector('.shop-product').getBoundingClientRect();
+            const topItems=[...document.querySelectorAll('.nav-list > li')].map(item=>item.querySelector(':scope > a, :scope > button'));
+            return {banner:{x:banner.x,y:banner.y,width:banner.width,height:banner.height},card:{x:card.x,y:card.y,width:card.width,height:card.height},nav:topItems.map(item=>Math.round(item.getBoundingClientRect().left*10)/10),scrollY,href:location.href};
         })()
     """)
-    expect(cart_state["total"] == f"${first_price * 10:.2f}" and "× 10" in cart_state["item"] and cart_state["count"] == "10" and not cart_state["countHidden"], "Desktop cart quantity, count, or total changed")
-    expect(cart_state["expanded"] == "true" and cart_state["panelBeforeCatalog"], "Opened cart did not remain in document flow above the product cards")
-    expect(cart_state["navPositions"] == storefront_shell["navPositions"], "A two-digit Cart count shifted the primary navigation")
-    cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
-    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '0'")
-    expect(cdp.evaluate("document.querySelector('[data-cart-total]').textContent === '$0.00' && document.querySelector('[data-cart-count]').hidden") is True, "Desktop cart removal did not reset the total and hide the empty count")
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && document.activeElement === document.querySelector('[data-close-cart]')", 15)
+    empty_cart_state = cdp.evaluate("""
+        (() => {
+            const layer=document.querySelector('[data-cart-region]');
+            const drawer=document.querySelector('[data-cart-panel]');
+            const drawerRect=drawer.getBoundingClientRect();
+            const banner=document.querySelector('.shop-banner').getBoundingClientRect();
+            const card=document.querySelector('.shop-product').getBoundingClientRect();
+            const topItems=[...document.querySelectorAll('.nav-list > li')].map(item=>item.querySelector(':scope > a, :scope > button'));
+            return {
+                layerPosition:getComputedStyle(layer).position,drawerPosition:getComputedStyle(drawer).position,
+                drawerRight:drawerRect.right,drawerWidth:drawerRect.width,drawerHeight:drawerRect.height,
+                backdropOpacity:Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity),
+                role:drawer.getAttribute('role'),modal:drawer.getAttribute('aria-modal'),expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'),
+                rootOverflow:getComputedStyle(document.documentElement).overflow,bodyOverflow:getComputedStyle(document.body).overflow,scrollY,
+                pageInert:document.querySelector('.header').inert && document.querySelector('main').inert,
+                empty:document.querySelector('.shop-empty-cart')?.textContent || '',subtotal:document.querySelector('[data-cart-total]').textContent,
+                checkoutControls:drawer.querySelectorAll('form, [data-checkout-form], input, textarea, button[type="submit"]').length,
+                banner:{x:banner.x,y:banner.y,width:banner.width,height:banner.height},card:{x:card.x,y:card.y,width:card.width,height:card.height},
+                nav:topItems.map(item=>Math.round(item.getBoundingClientRect().left*10)/10),overflow:document.documentElement.scrollWidth>innerWidth,
+                drawerInBody:drawer.closest('[data-cart-region]')?.parentElement===document.body
+            };
+        })()
+    """)
+    expect(empty_cart_state["layerPosition"] == "fixed" and empty_cart_state["drawerPosition"] == "fixed" and empty_cart_state["drawerRight"] == 1440 and 440 <= empty_cart_state["drawerWidth"] <= 520 and empty_cart_state["drawerHeight"] == 1000 and empty_cart_state["drawerInBody"], "Desktop Cart was not a generous, responsive right-edge fixed modal drawer: " + json.dumps(empty_cart_state))
+    expect(empty_cart_state["backdropOpacity"] > 0 and empty_cart_state["role"] == "dialog" and empty_cart_state["modal"] == "true" and empty_cart_state["expanded"] == "true" and empty_cart_state["pageInert"], "Cart backdrop or modal semantics were incorrect")
+    expect(empty_cart_state["rootOverflow"] == "hidden" and empty_cart_state["bodyOverflow"] == "hidden" and empty_cart_state["scrollY"] == cart_layout_before["scrollY"] and "Your cart is empty." in empty_cart_state["empty"] and empty_cart_state["subtotal"] == "$0.00" and empty_cart_state["checkoutControls"] == 0, "Empty Cart, scroll lock, or checkout removal was incorrect: " + json.dumps({"scroll": cart_layout_before["scrollY"], "open": empty_cart_state}))
+    expect(empty_cart_state["banner"] == cart_layout_before["banner"] and empty_cart_state["card"] == cart_layout_before["card"] and empty_cart_state["nav"] == cart_layout_before["nav"] and not empty_cart_state["overflow"], "Opening the empty Cart reflowed the Store or navigation: " + json.dumps({"before": cart_layout_before, "open": empty_cart_state}))
+
+    cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": 8})
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": 8})
+    expect(cdp.evaluate("document.activeElement === document.querySelector('[data-continue-shopping]')") is True, "Shift+Tab did not wrap focus to the final Cart control")
+    cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9})
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9})
+    expect(cdp.evaluate("document.activeElement === document.querySelector('[data-close-cart]')") is True, "Tab did not wrap focus to the first Cart control")
+    cdp.evaluate("document.querySelector('[data-continue-shopping]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+    continue_state = cdp.evaluate("({href:location.href,scrollY,focus:document.activeElement===document.querySelector('[data-open-cart]'),bodyPosition:getComputedStyle(document.body).position})")
+    expect(continue_state == {"href": cart_layout_before["href"], "scrollY": cart_layout_before["scrollY"], "focus": True, "bodyPosition": "static"}, "Continue Shopping navigated, lost position, or failed to restore focus: " + json.dumps(continue_state))
+
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 1200, "height": 800, "deviceScaleFactor": 1, "mobile": False,
+    })
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1", 5)
+    responsive_desktop_cart = cdp.evaluate("(() => { const rect=document.querySelector('[data-cart-panel]').getBoundingClientRect(); return {width:rect.width,right:rect.right,overflow:document.documentElement.scrollWidth>innerWidth}; })()")
+    expect(455 <= responsive_desktop_cart["width"] <= 457 and responsive_desktop_cart["right"] == 1200 and not responsive_desktop_cart["overflow"], "Cart width did not scale proportionally on a smaller desktop viewport: " + json.dumps(responsive_desktop_cart))
     cdp.evaluate("document.querySelector('[data-close-cart]').click()")
-    cdp.wait_for("document.querySelector('[data-cart-region]').hidden")
-    checks += 4
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
+    })
+
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    cdp.evaluate("document.querySelector('[data-close-cart]').click()")
+    closing_motion = cdp.evaluate("new Promise(resolve=>setTimeout(()=>{const drawer=document.querySelector('[data-cart-panel]');resolve({hidden:document.querySelector('[data-cart-region]').hidden,transform:getComputedStyle(drawer).transform});},90))", await_promise=True)
+    expect(not closing_motion["hidden"] and closing_motion["transform"] != "none" and closing_motion["transform"] != "matrix(1, 0, 0, 1, 0, 0)", "Cart did not slide toward the right while closing")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    cdp.evaluate("document.querySelector('[data-cart-backdrop]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden && document.activeElement === document.querySelector('[data-open-cart]')", 5)
+    checks += 11
+
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:1}},{{id:{second_product['id']},quantity:2}}])); location.reload()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '3'", 15)
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && document.querySelectorAll('.shop-cart-item').length === 2", 15)
+    multi_cart = cdp.evaluate("(() => { const row=document.querySelector('.shop-cart-item'); const info=row.querySelector('.shop-cart-item-copy').getBoundingClientRect(); const actions=row.querySelector('.shop-cart-item-actions').getBoundingClientRect(); const quantity=row.querySelector('.shop-cart-quantity').getBoundingClientRect(); const remove=row.querySelector('.shop-cart-remove').getBoundingClientRect(); return {rows:document.querySelectorAll('.shop-cart-item').length,count:document.querySelector('[data-cart-count]').textContent,subtotal:document.querySelector('[data-cart-total]').textContent,quantities:[...document.querySelectorAll('.shop-cart-quantity-value')].map(item=>item.textContent),touch:[...document.querySelectorAll('.shop-cart-quantity button')].every(button=>button.getBoundingClientRect().width>=44&&button.getBoundingClientRect().height>=44),alt:[...document.querySelectorAll('.shop-cart-item img')].every(image=>Boolean(image.alt)),overflowY:getComputedStyle(document.querySelector('[data-cart-items]')).overflowY,actionColumn:actions.left>=info.right&&remove.top>=quantity.bottom}; })()")
+    expect(multi_cart["rows"] == 2 and multi_cart["count"] == "3" and multi_cart["subtotal"] == f"${first_price + second_price * 2:.2f}" and multi_cart["quantities"] == ["1", "2"], "Multiple-item quantity, count, or subtotal rendering failed: " + json.dumps(multi_cart))
+    expect(multi_cart["touch"] and multi_cart["alt"] and multi_cart["overflowY"] == "auto", "Cart thumbnails, quantity targets, or scroll area were inaccessible")
+    expect(multi_cart["actionColumn"], "Desktop quantity and Remove controls were not grouped in the right-side action column")
+    cdp.evaluate(f"document.querySelector('[data-cart-increase=\"{first_product['id']}\"]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '4'", 5)
+    expect(cdp.evaluate(f"document.querySelector('[data-cart-total]').textContent === '${first_price * 2 + second_price * 2:.2f}' && JSON.parse(localStorage.getItem('dyndelShopCart')).find(item=>item.id==={first_product['id']}).quantity===2") is True, "Quantity increase did not immediately update storage, count, and subtotal")
+    cdp.evaluate(f"document.querySelector('[data-cart-decrease=\"{first_product['id']}\"]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '3'", 5)
+    cdp.wait_for(f"document.activeElement === document.querySelector('[data-cart-increase=\"{first_product['id']}\"]')", 5)
+    capture_screenshot(cdp, "shop-e-store-cart-desktop.png", full_page=False)
+
+    cart_theme_signatures = cdp.evaluate("""
+        (() => {
+            const root=document.documentElement;
+            const names=['--blue-deep','--panel-strong','--text'];
+            const original=Object.fromEntries(names.map(name=>[name,root.style.getPropertyValue(name)]));
+            const palettes=[['default','#c86f52','#fff8f3','#3d2925'],['pastel','#7968d8','#fbf8ff','#34304f'],['midnight','#8ca8ff','#171a2b','#f3f5ff']];
+            const values=palettes.map(([name,accent,surface,text])=>{root.style.setProperty('--blue-deep',accent);root.style.setProperty('--panel-strong',surface);root.style.setProperty('--text',text);return{name,drawer:getComputedStyle(document.querySelector('[data-cart-panel]')).backgroundColor,quantity:getComputedStyle(document.querySelector('.shop-cart-quantity')).backgroundColor,focus:getComputedStyle(document.querySelector('[data-close-cart]')).outlineColor};});
+            names.forEach(name=>original[name]?root.style.setProperty(name,original[name]):root.style.removeProperty(name));
+            return values;
+        })()
+    """)
+    expect(len({item["drawer"] for item in cart_theme_signatures}) == 3 and len({item["quantity"] for item in cart_theme_signatures}) == 3, "Default, Pastel, and Midnight tokens did not restyle Cart V2: " + json.dumps(cart_theme_signatures))
+    cdp.evaluate("document.querySelector('[data-close-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:{first_product['stock']}}}])); location.reload()")
+    cdp.wait_for(f"document.querySelector('[data-cart-count]').textContent === '{first_product['stock']}'", 15)
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    cdp.evaluate(f"document.querySelector('[data-cart-increase=\"{first_product['id']}\"]').click()")
+    stock_limit_state = cdp.evaluate(f"({{quantity:document.querySelector('.shop-cart-quantity-value').textContent,count:document.querySelector('[data-cart-count]').textContent,stored:JSON.parse(localStorage.getItem('dyndelShopCart'))[0].quantity,feedback:document.querySelector('[data-cart-feedback]').textContent,nav:[...document.querySelectorAll('.nav-list>li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10)}})")
+    expect(stock_limit_state["quantity"] == str(first_product["stock"]) and stock_limit_state["count"] == str(first_product["stock"]) and stock_limit_state["stored"] == first_product["stock"] and "available limit" in stock_limit_state["feedback"], "Stock ceiling was not enforced with restrained feedback")
+    expect(stock_limit_state["nav"] == storefront_shell["navPositions"], "A two-digit Cart count or open drawer shifted desktop navigation")
+    cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
+    cdp.wait_for("document.querySelector('.shop-empty-cart') && document.querySelector('[data-cart-count]').hidden && !document.querySelector('[data-cart-region]').hidden && document.querySelector('[data-cart-total]').textContent === '$0.00' && JSON.parse(localStorage.getItem('dyndelShopCart')).length === 0 && document.activeElement === document.querySelector('[data-continue-shopping]')", 5)
+    cdp.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
+    expect(cdp.evaluate("getComputedStyle(document.querySelector('[data-cart-panel]')).transitionDuration === '0s' && getComputedStyle(document.querySelector('[data-cart-backdrop]')).transitionDuration === '0s'") is True, "Reduced motion did not disable Cart drawer/backdrop transitions")
+    cdp.evaluate("document.querySelector('[data-close-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 2)
+    cdp.call("Emulation.setEmulatedMedia", {"features": []})
+
+    cdp.evaluate("localStorage.setItem('dyndelShopCart', JSON.stringify({bad:true})); location.reload()")
+    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3", 15)
+    expect(cdp.evaluate("JSON.stringify(JSON.parse(localStorage.getItem('dyndelShopCart'))) === '[]' && document.querySelector('[data-cart-count]').hidden") is True, "Malformed non-array Cart storage was not normalized safely")
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([null,{{id:'bad',quantity:2}},{{id:{first_product['id']},quantity:1}},{{id:{first_product['id']},quantity:2}},{{id:999999,quantity:1}}])); location.reload()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '3'", 15)
+    resilient_cart = cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))")
+    expect(resilient_cart == [{"id": first_product["id"], "quantity": 3}], "Malformed, duplicate, or stale Cart entries were not reconciled safely: " + json.dumps(resilient_cart))
+    cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
+    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
+    checks += 13
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
@@ -798,6 +919,61 @@ try:
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
     expect(cdp.evaluate("document.querySelector('.nav').classList.contains('open')") is True, "Mobile navigation toggle did not open")
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    checks += 4
+
+    mobile_cart_seed = [{"id": product["id"], "quantity": 1} for product in initial_public_products]
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', {js_string(json.dumps(mobile_cart_seed))}); location.reload()")
+    cdp.wait_for(f"document.querySelector('[data-cart-count]').textContent === '{len(mobile_cart_seed)}' && document.querySelectorAll('.shop-product').length === 3", 15)
+    mobile_store_before_cart = cdp.evaluate("(() => { const banner=document.querySelector('.shop-banner').getBoundingClientRect(); const card=document.querySelector('.shop-product').getBoundingClientRect(); const header=document.querySelector('.header').getBoundingClientRect(); return {banner:{x:banner.x,y:banner.y,width:banner.width},card:{x:card.x,y:card.y,width:card.width},header:{x:header.x,y:header.y,width:header.width},overflow:document.documentElement.scrollWidth>innerWidth}; })()")
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && document.activeElement === document.querySelector('[data-close-cart]')", 15)
+    mobile_store_cart = cdp.evaluate("""
+        (() => {
+            const drawer=document.querySelector('[data-cart-panel]');
+            const drawerRect=drawer.getBoundingClientRect();
+            const banner=document.querySelector('.shop-banner').getBoundingClientRect();
+            const card=document.querySelector('.shop-product').getBoundingClientRect();
+            const header=document.querySelector('.header').getBoundingClientRect();
+            const cartHeader=document.querySelector('.shop-cart-header').getBoundingClientRect();
+            const footer=document.querySelector('.shop-cart-footer').getBoundingClientRect();
+            const firstRow=drawer.querySelector('.shop-cart-item');
+            const information=firstRow.querySelector('.shop-cart-item-copy').getBoundingClientRect();
+            const actions=firstRow.querySelector('.shop-cart-item-actions').getBoundingClientRect();
+            const quantity=firstRow.querySelector('.shop-cart-quantity').getBoundingClientRect();
+            const remove=firstRow.querySelector('.shop-cart-remove').getBoundingClientRect();
+            return {
+                position:getComputedStyle(drawer).position,width:drawerRect.width,right:drawerRect.right,height:drawerRect.height,
+                rows:drawer.querySelectorAll('.shop-cart-item').length,count:document.querySelector('[data-cart-count]').textContent,
+                closeVisible:document.querySelector('[data-close-cart]').getBoundingClientRect().bottom <= innerHeight,
+                cartHeaderTop:cartHeader.top,footerBottom:footer.bottom,touch:[...drawer.querySelectorAll('.shop-cart-quantity button')].every(button=>button.getBoundingClientRect().width>=44&&button.getBoundingClientRect().height>=44),
+                mobileActions:actions.top>=information.bottom&&Math.abs(actions.left-information.left)<1&&remove.top>=quantity.bottom,
+                banner:{x:banner.x,y:banner.y,width:banner.width},card:{x:card.x,y:card.y,width:card.width},header:{x:header.x,y:header.y,width:header.width},
+                pageLocked:getComputedStyle(document.documentElement).overflow==='hidden'&&getComputedStyle(document.body).overflow==='hidden',burgerInert:document.querySelector('.menu-toggle').closest('.header').inert,
+                overflow:document.documentElement.scrollWidth>innerWidth
+            };
+        })()
+    """)
+    expect(mobile_store_cart["position"] == "fixed" and 360 <= mobile_store_cart["width"] <= 390 and mobile_store_cart["right"] == 390 and mobile_store_cart["height"] == 844, "Mobile Cart was not a nearly full-width fixed drawer: " + json.dumps(mobile_store_cart))
+    expect(mobile_store_cart["rows"] == 3 and mobile_store_cart["count"] == "3" and mobile_store_cart["closeVisible"] and mobile_store_cart["cartHeaderTop"] == 0 and mobile_store_cart["footerBottom"] == 844 and mobile_store_cart["touch"] and mobile_store_cart["mobileActions"], "Mobile Cart content, grouped actions, stable regions, or touch targets were incorrect: " + json.dumps(mobile_store_cart))
+    expect(mobile_store_cart["banner"] == mobile_store_before_cart["banner"] and mobile_store_cart["card"] == mobile_store_before_cart["card"] and mobile_store_cart["header"] == mobile_store_before_cart["header"] and mobile_store_cart["pageLocked"] and mobile_store_cart["burgerInert"] and not mobile_store_cart["overflow"], "Opening mobile Cart reflowed the Store or left the page interactive: " + json.dumps({"before": mobile_store_before_cart, "open": mobile_store_cart}))
+    capture_screenshot(cdp, "shop-e-store-cart-mobile.png", full_page=False)
+    cdp.evaluate("document.querySelector('[data-close-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 390, "height": 420, "deviceScaleFactor": 1, "mobile": True,
+    })
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open')", 5)
+    short_mobile_cart = cdp.evaluate("(() => { const items=document.querySelector('[data-cart-items]'); const header=document.querySelector('.shop-cart-header').getBoundingClientRect(); const footer=document.querySelector('.shop-cart-footer').getBoundingClientRect(); items.scrollTop=items.scrollHeight; return {scrollable:items.scrollHeight>items.clientHeight,scrolled:items.scrollTop>0,headerTop:header.top,footerBottom:footer.bottom,overflow:document.documentElement.scrollWidth>innerWidth}; })()")
+    expect(short_mobile_cart == {"scrollable": True, "scrolled": True, "headerTop": 0, "footerBottom": 420, "overflow": False}, "Short mobile Cart did not keep its header/footer stable with an internally scrolling item list: " + json.dumps(short_mobile_cart))
+    cdp.evaluate("document.querySelector('[data-cart-backdrop]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden", 5)
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
+    })
+    cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
+    cdp.wait_for("document.querySelectorAll('.shop-product').length === 3 && document.querySelector('[data-cart-count]').hidden", 15)
     checks += 4
 
     primary_url = BASE + "img/illustration/balaam.jpg"
@@ -1178,13 +1354,16 @@ try:
     cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '1' && !document.querySelector('.shop-product-confirmation').hidden", 15)
     add_state = cdp.evaluate("({cart:JSON.parse(localStorage.getItem('dyndelShopCart')),message:document.querySelector('.shop-product-confirmation > p').textContent,continueHref:document.querySelector('.shop-product-confirmation a').getAttribute('href')})")
     expect(add_state["cart"] == [{"id": normal_product["id"], "quantity": 1}] and add_state["message"] == "Added to Cart." and add_state["continueHref"] == "store.html", "Product Detail Add to Cart or lightweight confirmation failed")
+    detail_layout_before_cart = cdp.evaluate("(() => { const detail=document.querySelector('.shop-product-detail').getBoundingClientRect(); const gallery=document.querySelector('.shop-product-gallery').getBoundingClientRect(); const nav=[...document.querySelectorAll('.nav-list>li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10); return {detail:{x:detail.x,y:detail.y,width:detail.width},gallery:{x:gallery.x,y:gallery.y,width:gallery.width},nav,overflow:document.documentElement.scrollWidth>innerWidth}; })()")
     cdp.evaluate("[...document.querySelectorAll('.shop-product-confirmation button')].find(button=>button.textContent.includes('View Cart')).click()")
-    cdp.wait_for("!document.querySelector('[data-cart-panel]').hidden && Boolean(document.querySelector('.shop-cart-item'))", 15)
-    detail_cart = cdp.evaluate("({expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'),item:document.querySelector('.shop-cart-item strong').textContent,total:document.querySelector('[data-cart-total]').textContent})")
-    expect(detail_cart["expanded"] == "true" and detail_cart["item"] == normal_product["title"] and detail_cart["total"] == "$" + normal_product["currentPrice"], "Product Detail did not invoke the existing Cart behavior")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && Boolean(document.querySelector('.shop-cart-item')) && document.activeElement === document.querySelector('[data-close-cart]')", 15)
+    detail_cart = cdp.evaluate("(() => { const detail=document.querySelector('.shop-product-detail').getBoundingClientRect(); const gallery=document.querySelector('.shop-product-gallery').getBoundingClientRect(); return {expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'),item:document.querySelector('.shop-cart-item strong').textContent,total:document.querySelector('[data-cart-total]').textContent,detail:{x:detail.x,y:detail.y,width:detail.width},gallery:{x:gallery.x,y:gallery.y,width:gallery.width},nav:[...document.querySelectorAll('.nav-list>li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10),overflow:document.documentElement.scrollWidth>innerWidth}; })()")
+    expect(detail_cart["expanded"] == "true" and detail_cart["item"] == normal_product["title"] and detail_cart["total"] == "$" + normal_product["currentPrice"], "Product Detail View Cart did not invoke the modal drawer")
+    expect(detail_cart["detail"] == detail_layout_before_cart["detail"] and detail_cart["gallery"] == detail_layout_before_cart["gallery"] and detail_cart["nav"] == detail_layout_before_cart["nav"] and not detail_cart["overflow"], "Opening Cart reflowed the desktop Product Detail/gallery: " + json.dumps({"before": detail_layout_before_cart, "open": detail_cart}))
+    capture_screenshot(cdp, "shop-e-product-detail-cart-desktop.png", full_page=False)
     cdp.evaluate("document.querySelector('[data-remove-cart]').click(); document.querySelector('[data-close-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-count]').hidden && document.querySelector('[data-cart-region]').hidden", 15)
-    checks += 9
+    checks += 10
 
     cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(v2_fields["slug"]), "document.querySelectorAll('.shop-product-thumbnail').length === 2")
     inquiry_detail = cdp.evaluate("""
@@ -1288,12 +1467,25 @@ try:
     """)
     expect(mobile_detail["columns"] == 1 and mobile_detail["thumbWidth"] >= 44 and mobile_detail["thumbHeight"] >= 44 and mobile_detail["actionHeight"] >= 44 and mobile_detail["imageLoaded"], "Mobile Product Detail did not stack with usable gallery/action targets: " + json.dumps(mobile_detail))
     expect(mobile_detail["bannerDisplay"] == "none" and mobile_detail["cartVisible"] == "visible" and mobile_detail["menuDisplay"] != "none" and mobile_detail["mascotDisplay"] == "none" and not mobile_detail["overflow"], "Mobile Product Detail navigation, decoration, banner, or overflow regressed")
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{normal_product['id']},quantity:1}}])); location.reload()")
+    cdp.wait_for("document.querySelectorAll('.shop-product-thumbnail').length === 2 && document.querySelector('[data-cart-count]').textContent === '1'", 15)
+    mobile_detail_before_cart = cdp.evaluate("(() => { const detail=document.querySelector('.shop-product-detail').getBoundingClientRect(); const gallery=document.querySelector('.shop-product-gallery').getBoundingClientRect(); const header=document.querySelector('.header').getBoundingClientRect(); return {detail:{x:detail.x,y:detail.y,width:detail.width},gallery:{x:gallery.x,y:gallery.y,width:gallery.width},header:{x:header.x,y:header.y,width:header.width}}; })()")
+    cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && Number(getComputedStyle(document.querySelector('[data-cart-backdrop]')).opacity) === 1 && Boolean(document.querySelector('.shop-cart-item')) && document.activeElement === document.querySelector('[data-close-cart]')", 15)
+    mobile_detail_cart = cdp.evaluate("(() => { const detail=document.querySelector('.shop-product-detail').getBoundingClientRect(); const gallery=document.querySelector('.shop-product-gallery').getBoundingClientRect(); const header=document.querySelector('.header').getBoundingClientRect(); const drawer=document.querySelector('[data-cart-panel]').getBoundingClientRect(); return {detail:{x:detail.x,y:detail.y,width:detail.width},gallery:{x:gallery.x,y:gallery.y,width:gallery.width},header:{x:header.x,y:header.y,width:header.width},drawerWidth:drawer.width,drawerRight:drawer.right,item:document.querySelector('.shop-cart-item strong').textContent,overflow:document.documentElement.scrollWidth>innerWidth}; })()")
+    expect(mobile_detail_cart["detail"] == mobile_detail_before_cart["detail"] and mobile_detail_cart["gallery"] == mobile_detail_before_cart["gallery"] and mobile_detail_cart["header"] == mobile_detail_before_cart["header"], "Opening Cart reflowed the mobile Product Detail/gallery: " + json.dumps({"before": mobile_detail_before_cart, "open": mobile_detail_cart}))
+    expect(360 <= mobile_detail_cart["drawerWidth"] <= 390 and mobile_detail_cart["drawerRight"] == 390 and mobile_detail_cart["item"] == normal_product["title"] and not mobile_detail_cart["overflow"], "Mobile Product Detail Cart overlay was incorrect: " + json.dumps(mobile_detail_cart))
+    capture_screenshot(cdp, "shop-e-product-detail-cart-mobile.png", full_page=False)
+    cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
+    cdp.wait_for("document.querySelector('[data-cart-region]').hidden && document.activeElement === document.querySelector('[data-open-cart]')", 5)
+    cdp.evaluate("localStorage.removeItem('dyndelShopCart')")
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
     cdp.wait_for("document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'visible' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 1", 5)
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
     cdp.wait_for("!document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'hidden'", 5)
     capture_screenshot(cdp, "shop-d-product-detail-mobile.png")
-    checks += 3
+    checks += 5
 
     cdp.navigate(BASE + "store.html", "document.querySelectorAll('.shop-product').length === 5")
     mobile_storefront = cdp.evaluate(f"""
