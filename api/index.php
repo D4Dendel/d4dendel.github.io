@@ -231,7 +231,15 @@ if ($action === 'shop-product' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         json_response(['error' => 'Product not found.'], 404);
     }
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT ' . shop_product_columns() . " FROM shop_products WHERE slug = ? AND publication_status = 'published' LIMIT 1");
+    $stmt = $pdo->prepare(
+        'SELECT ' . shop_product_columns() . "
+         FROM shop_products
+         WHERE slug = ?
+           AND publication_status = 'published'
+           AND storefront_visible = 1
+           AND (stock > 0 OR show_when_sold_out = 1)
+         LIMIT 1"
+    );
     $stmt->execute([$slug]);
     $row = $stmt->fetch();
     if (!$row) json_response(['error' => 'Product not found.'], 404);

@@ -240,10 +240,21 @@ if (menuToggle && nav) {
 }
 
 if (publicHeader && document.body.dataset.page !== 'admin') {
+  const compactHeaderEnterThreshold = 80;
+  const compactHeaderExitThreshold = 40;
   let compactHeaderFrame = 0;
+  let compactHeaderActive = publicHeader.classList.contains('is-compact');
+  publicHeader.dataset.compactEnterThreshold = String(compactHeaderEnterThreshold);
+  publicHeader.dataset.compactExitThreshold = String(compactHeaderExitThreshold);
   const syncCompactHeader = () => {
     compactHeaderFrame = 0;
-    publicHeader.classList.toggle('is-compact', window.scrollY > 72);
+    const scrollPosition = Math.max(0, window.scrollY);
+    const shouldCompact = compactHeaderActive
+      ? scrollPosition > compactHeaderExitThreshold
+      : scrollPosition > compactHeaderEnterThreshold;
+    if (shouldCompact === compactHeaderActive) return;
+    compactHeaderActive = shouldCompact;
+    publicHeader.classList.toggle('is-compact', compactHeaderActive);
   };
   const scheduleCompactHeader = () => {
     if (!compactHeaderFrame) compactHeaderFrame = window.requestAnimationFrame(syncCompactHeader);
@@ -2763,6 +2774,8 @@ contactForm?.addEventListener('submit', async (event) => {
 });
 
 const shopProductsTarget = document.querySelector('[data-shop-products]');
+const shopProductDetailView = document.querySelector('[data-shop-detail-view]');
+const shopProductDetailTarget = document.querySelector('[data-product-detail]');
 const cartPanel = document.querySelector('[data-cart-panel]');
 const cartRegion = document.querySelector('[data-cart-region]');
 const cartItemsTarget = document.querySelector('[data-cart-items]');
@@ -2771,8 +2784,11 @@ const cartCountTargets = document.querySelectorAll('[data-cart-count]');
 const checkoutForm = document.querySelector('[data-checkout-form]');
 const checkoutMessage = document.querySelector('[data-checkout-message]');
 const CART_KEY = 'dyndelShopCart';
+const requestedProductSlug = new URLSearchParams(window.location.search).get('product')?.trim() || '';
 let shopProducts = [];
 let cart = getStoredData(CART_KEY, []);
+let shopCatalogHydrated = false;
+let shopCatalogRequest = null;
 
 const saveCart = () => saveData(CART_KEY, cart);
 const money = (value) => `$${Number(value).toFixed(2)}`;
@@ -2783,7 +2799,8 @@ const renderCart = () => {
     ...item,
     product: shopProducts.find((product) => Number(product.id) === Number(item.id))
   })).filter((item) => item.product);
-  const count = detailedCart.reduce((sum, item) => sum + item.quantity, 0);
+  const countSource = shopCatalogHydrated || !requestedProductSlug ? detailedCart : cart;
+  const count = countSource.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const total = detailedCart.reduce((sum, item) => sum + Number(item.product.currentPrice ?? item.product.price) * item.quantity, 0);
   cartCountTargets.forEach((target) => {
     target.textContent = count;
@@ -2825,8 +2842,17 @@ const renderCart = () => {
   }
 };
 
+const safeExternalProductUrl = (value) => {
+  try {
+    const destination = new URL(value);
+    return ['http:', 'https:'].includes(destination.protocol) ? destination.href : '';
+  } catch (error) {
+    return '';
+  }
+};
+
 const shopProductHref = (product) => {
-  if (product.purchaseAction === 'external' && product.externalUrl) return product.externalUrl;
+  if (product.purchaseAction === 'external' && product.externalUrl) return safeExternalProductUrl(product.externalUrl) || '#';
   if (product.purchaseAction === 'inquiry') return 'index.html#contact';
   return `store.html?product=${encodeURIComponent(product.slug)}`;
 };
@@ -2834,6 +2860,27 @@ const shopProductHref = (product) => {
 const publicProductBadges = (product) => (product.badges || [])
   .filter((badge) => badge.key === 'sale' || badge.key === 'sold-out' || badge.source === 'manual')
   .slice(0, 3);
+
+const createShopPrice = (product, className = 'shop-product-price') => {
+  const pricing = document.createElement('p');
+  pricing.className = className;
+  if (product.onSale) {
+    const currentLabel = document.createElement('span');
+    currentLabel.className = 'visually-hidden';
+    currentLabel.textContent = 'Sale price ';
+    const current = document.createElement('strong');
+    current.textContent = shopPrice(product.currentPrice);
+    const regular = document.createElement('del');
+    const regularLabel = document.createElement('span');
+    regularLabel.className = 'visually-hidden';
+    regularLabel.textContent = 'Regular price ';
+    regular.append(regularLabel, document.createTextNode(shopPrice(product.regularPrice)));
+    pricing.append(currentLabel, current, regular);
+  } else {
+    pricing.textContent = shopPrice(product.currentPrice ?? product.price);
+  }
+  return pricing;
+};
 
 const createShopProductCard = (product) => {
   const card = document.createElement('article');
@@ -2891,23 +2938,7 @@ const createShopProductCard = (product) => {
   copy.className = 'shop-product-copy';
   const title = document.createElement('h3');
   title.textContent = product.title;
-  const pricing = document.createElement('p');
-  pricing.className = 'shop-product-price';
-  if (product.onSale) {
-    const currentLabel = document.createElement('span');
-    currentLabel.className = 'visually-hidden';
-    currentLabel.textContent = 'Sale price ';
-    const current = document.createElement('strong');
-    current.textContent = shopPrice(product.currentPrice);
-    const regular = document.createElement('del');
-    const regularLabel = document.createElement('span');
-    regularLabel.className = 'visually-hidden';
-    regularLabel.textContent = 'Regular price ';
-    regular.append(regularLabel, document.createTextNode(shopPrice(product.regularPrice)));
-    pricing.append(currentLabel, current, regular);
-  } else {
-    pricing.textContent = shopPrice(product.currentPrice ?? product.price);
-  }
+  const pricing = createShopPrice(product);
   copy.append(title, pricing);
   link.append(media, copy);
   card.append(link);
@@ -2950,17 +2981,276 @@ const renderShopProducts = () => {
   renderShopBannerArt();
 };
 
-if (shopProductsTarget) {
-  cmsRequest('shop').then((data) => {
-    shopProducts = data.products;
-    renderShopProducts();
-    renderCart();
-  }).catch((error) => {
-    const message = document.createElement('p');
-    message.className = 'shop-form-message';
-    message.textContent = error.message;
-    shopProductsTarget.replaceChildren(message);
+const addShopProductToCart = (product, quantity = 1) => {
+  if (product.purchaseAction !== 'internal' || !product.available) return { added: false, reason: 'unavailable' };
+  const stock = Math.max(0, Number(product.stock) || 0);
+  const increment = Math.max(1, Math.floor(Number(quantity) || 1));
+  const existing = cart.find((item) => Number(item.id) === Number(product.id));
+  if (existing && existing.quantity >= stock) return { added: false, reason: 'stock' };
+  if (existing) existing.quantity = Math.min(stock, existing.quantity + increment);
+  else cart.push({ id: Number(product.id), quantity: Math.min(stock, increment) });
+  saveCart();
+  renderCart();
+  return { added: true, quantity: existing?.quantity || Math.min(stock, increment) };
+};
+
+const createProductBadges = (product) => {
+  const badges = publicProductBadges(product);
+  if (!badges.length) return null;
+  const list = document.createElement('div');
+  list.className = 'shop-product-detail-badges';
+  list.setAttribute('aria-label', 'Product details');
+  badges.forEach((badge) => {
+    const label = document.createElement('span');
+    label.className = `shop-product-badge is-${badge.key}`;
+    label.textContent = badge.label;
+    list.append(label);
   });
+  return list;
+};
+
+const updateShopProductMetadata = (product = null) => {
+  const descriptionMeta = document.querySelector('[data-shop-meta-description]');
+  if (!product) {
+    document.title = 'Shop | Dyndel Pino';
+    if (descriptionMeta) descriptionMeta.content = 'Browse original artwork and studio pieces by Dyndel Pino.';
+    return;
+  }
+  document.title = `${product.title} | Dyndel Pino`;
+  if (descriptionMeta) {
+    const description = String(product.shortDescription || product.description || '').replace(/\s+/g, ' ').trim();
+    descriptionMeta.content = description.slice(0, 155) || `View ${product.title} by Dyndel Pino.`;
+  }
+};
+
+const createProductGallery = (product) => {
+  const gallery = document.createElement('section');
+  gallery.className = 'shop-product-gallery';
+  gallery.setAttribute('aria-label', `${product.title} gallery`);
+  const images = product.images?.length
+    ? product.images
+    : [{ path: product.image, altText: '', sortOrder: 1 }];
+  const mainFrame = document.createElement('div');
+  mainFrame.className = 'shop-product-main-frame';
+  const mainImage = document.createElement('img');
+  mainImage.className = 'shop-product-main-image';
+  mainImage.id = 'shop-product-main-image';
+  mainImage.src = images[0].path || product.image;
+  mainImage.alt = images[0].altText?.trim() || product.title;
+  mainImage.decoding = 'async';
+  mainFrame.append(mainImage);
+  gallery.append(mainFrame);
+
+  if (images.length > 1) {
+    const thumbnails = document.createElement('div');
+    thumbnails.className = 'shop-product-thumbnails';
+    thumbnails.setAttribute('aria-label', 'Choose product image');
+    images.forEach((imageData, index) => {
+      const thumbnail = document.createElement('button');
+      thumbnail.className = 'shop-product-thumbnail';
+      thumbnail.type = 'button';
+      thumbnail.dataset.productImageIndex = String(index);
+      thumbnail.setAttribute('aria-controls', mainImage.id);
+      thumbnail.setAttribute('aria-pressed', String(index === 0));
+      thumbnail.setAttribute('aria-label', `View image ${index + 1} of ${images.length}`);
+      const image = document.createElement('img');
+      image.src = imageData.path;
+      image.alt = '';
+      image.loading = index === 0 ? 'eager' : 'lazy';
+      thumbnail.append(image);
+      const selectImage = () => {
+        mainImage.src = imageData.path;
+        mainImage.alt = imageData.altText?.trim() || product.title;
+        thumbnails.querySelectorAll('[aria-pressed]').forEach((item) => item.setAttribute('aria-pressed', String(item === thumbnail)));
+      };
+      thumbnail.addEventListener('click', selectImage);
+      thumbnail.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectImage();
+          return;
+        }
+        const movement = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+        if (!movement && event.key !== 'Home' && event.key !== 'End') return;
+        event.preventDefault();
+        const nextIndex = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? images.length - 1
+            : (index + movement + images.length) % images.length;
+        const nextThumbnail = thumbnails.querySelector(`[data-product-image-index="${nextIndex}"]`);
+        nextThumbnail?.focus();
+        nextThumbnail?.click();
+      });
+      thumbnails.append(thumbnail);
+    });
+    gallery.append(thumbnails);
+  }
+  return gallery;
+};
+
+const renderShopProductState = (kind) => {
+  if (!shopProductDetailTarget || !shopProductDetailView) return;
+  shopProductDetailView.setAttribute('aria-busy', 'false');
+  const state = document.createElement('div');
+  state.className = 'shop-product-state';
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'eyebrow';
+  eyebrow.textContent = 'Artist shop';
+  const heading = document.createElement('h1');
+  heading.textContent = kind === 'error' ? 'The shop could not load.' : 'Artwork not found.';
+  const message = document.createElement('p');
+  message.className = 'shop-product-state-message';
+  message.textContent = kind === 'error'
+    ? 'Please check your connection and try again.'
+    : 'This piece may be unavailable or no longer shown in the shop.';
+  const back = document.createElement('a');
+  back.className = 'btn btn-primary';
+  back.href = 'store.html';
+  back.textContent = 'Back to Store';
+  state.append(eyebrow, heading, message, back);
+  if (kind === 'error') {
+    const retry = document.createElement('button');
+    retry.className = 'btn btn-secondary';
+    retry.type = 'button';
+    retry.textContent = 'Try again';
+    retry.addEventListener('click', () => window.location.reload());
+    state.append(retry);
+  }
+  shopProductDetailTarget.replaceChildren(state);
+  document.title = `${kind === 'error' ? 'Shop unavailable' : 'Artwork not found'} | Dyndel Pino`;
+};
+
+let setCartOpen = () => {};
+
+const renderShopProductDetail = (product) => {
+  if (!shopProductDetailTarget || !shopProductDetailView) return;
+  const detail = document.createElement('article');
+  detail.className = 'shop-product-detail';
+  detail.dataset.productId = String(product.id);
+  detail.append(createProductGallery(product));
+
+  const information = document.createElement('div');
+  information.className = 'shop-product-information';
+  const back = document.createElement('a');
+  back.className = 'shop-product-back';
+  back.href = 'store.html';
+  back.textContent = 'Back to Store';
+  const badges = createProductBadges(product);
+  const title = document.createElement('h1');
+  title.textContent = product.title;
+  const pricing = createShopPrice(product, 'shop-product-detail-price');
+  const description = document.createElement('p');
+  description.className = 'shop-product-description';
+  description.textContent = product.description || product.shortDescription;
+  const actionArea = document.createElement('div');
+  actionArea.className = 'shop-product-actions';
+  const availability = document.createElement('p');
+  availability.className = `shop-product-availability ${product.available ? 'is-available' : 'is-sold-out'}`;
+  availability.textContent = product.available ? 'Available' : 'Sold out';
+
+  if (product.purchaseAction === 'internal') {
+    const addButton = document.createElement('button');
+    addButton.className = 'btn btn-primary shop-product-action';
+    addButton.type = 'button';
+    addButton.dataset.addCart = String(product.id);
+    addButton.textContent = product.available ? 'Add to Cart' : 'Sold out';
+    addButton.disabled = !product.available;
+    actionArea.append(availability, addButton);
+    if (product.available) {
+      const confirmation = document.createElement('div');
+      confirmation.className = 'shop-product-confirmation';
+      confirmation.setAttribute('role', 'status');
+      confirmation.setAttribute('aria-live', 'polite');
+      confirmation.hidden = true;
+      const confirmationMessage = document.createElement('p');
+      const confirmationActions = document.createElement('div');
+      confirmationActions.className = 'shop-product-confirmation-actions';
+      const continueLink = document.createElement('a');
+      continueLink.href = 'store.html';
+      continueLink.textContent = 'Continue shopping';
+      const viewCart = document.createElement('button');
+      viewCart.type = 'button';
+      viewCart.textContent = 'View Cart';
+      viewCart.addEventListener('click', () => setCartOpen(true));
+      confirmationActions.append(continueLink, viewCart);
+      confirmation.append(confirmationMessage, confirmationActions);
+      addButton.addEventListener('click', () => {
+        const result = addShopProductToCart(product);
+        confirmationMessage.textContent = result.added ? 'Added to Cart.' : 'All available copies are already in your cart.';
+        confirmation.hidden = false;
+      });
+      actionArea.append(confirmation);
+    }
+  } else if (product.purchaseAction === 'external') {
+    const destination = safeExternalProductUrl(product.externalUrl);
+    if (destination) {
+      const external = document.createElement('a');
+      external.className = 'btn btn-primary shop-product-action';
+      external.href = destination;
+      external.target = '_blank';
+      external.rel = 'noopener noreferrer';
+      external.textContent = 'View externally';
+      actionArea.append(external);
+    } else {
+      const unavailable = document.createElement('p');
+      unavailable.className = 'shop-product-availability is-sold-out';
+      unavailable.textContent = 'Purchase link unavailable';
+      actionArea.append(unavailable);
+    }
+  } else {
+    const inquiry = document.createElement('a');
+    inquiry.className = 'btn btn-primary shop-product-action';
+    inquiry.href = 'index.html#contact';
+    inquiry.textContent = 'Send an inquiry';
+    actionArea.append(inquiry);
+  }
+
+  information.append(back);
+  if (badges) information.append(badges);
+  information.append(title, pricing, description, actionArea);
+  detail.append(information);
+  shopProductDetailTarget.replaceChildren(detail);
+  shopProductDetailView.setAttribute('aria-busy', 'false');
+  updateShopProductMetadata(product);
+};
+
+const loadShopCatalog = () => {
+  if (!shopCatalogRequest) {
+    shopCatalogRequest = cmsRequest('shop').then((data) => {
+      shopProducts = data.products;
+      shopCatalogHydrated = true;
+      return shopProducts;
+    }).catch((error) => {
+      shopCatalogRequest = null;
+      throw error;
+    });
+  }
+  return shopCatalogRequest;
+};
+
+if (shopProductsTarget || shopProductDetailTarget) {
+  renderCart();
+    const message = document.createElement('p');
+  if (requestedProductSlug && shopProductDetailTarget) {
+    cmsRequest(`shop-product&slug=${encodeURIComponent(requestedProductSlug)}`).then((data) => {
+      shopProducts = [data.product];
+      renderShopProductDetail(data.product);
+      renderCart();
+    }).catch((error) => {
+      renderShopProductState(error.message === 'Product not found.' ? 'not-found' : 'error');
+    });
+  } else {
+    updateShopProductMetadata();
+    loadShopCatalog().then(() => {
+      renderShopProducts();
+      renderCart();
+    }).catch((error) => {
+      message.className = 'shop-form-message';
+      message.textContent = error.message;
+      shopProductsTarget.replaceChildren(message);
+    });
+  }
   document.addEventListener('click', (event) => {
     const removeButton = event.target.closest('[data-remove-cart]');
     if (removeButton) {
@@ -2969,11 +3259,22 @@ if (shopProductsTarget) {
       renderCart();
     }
   });
-  const setCartOpen = (open) => {
+  setCartOpen = async (open) => {
     if (!cartPanel || !cartRegion) return;
     cartRegion.hidden = !open;
     cartPanel.hidden = !open;
     document.querySelector('[data-open-cart]')?.setAttribute('aria-expanded', String(open));
+    if (open && !shopCatalogHydrated) {
+      cartPanel.setAttribute('aria-busy', 'true');
+      try {
+        await loadShopCatalog();
+        renderCart();
+      } catch (error) {
+        if (checkoutMessage) checkoutMessage.textContent = 'The cart could not refresh. Please try again.';
+      } finally {
+        cartPanel.removeAttribute('aria-busy');
+      }
+    }
   };
   document.querySelector('[data-open-cart]')?.addEventListener('click', () => setCartOpen(true));
   document.querySelector('[data-close-cart]')?.addEventListener('click', () => setCartOpen(false));

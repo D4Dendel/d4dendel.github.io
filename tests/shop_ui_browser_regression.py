@@ -428,9 +428,90 @@ try:
             document.activeElement?.blur();
             scrollTo(0,0);
             const header=document.querySelector('.header');
-            return {position:getComputedStyle(header).position,normalHeight:header.getBoundingClientRect().height,normalLogo:document.querySelector('.logo-wrap img').getBoundingClientRect().width};
+            return {position:getComputedStyle(header).position,normalHeight:header.getBoundingClientRect().height,normalLogo:document.querySelector('.logo-wrap img').getBoundingClientRect().width,enter:Number(header.dataset.compactEnterThreshold),exit:Number(header.dataset.compactExitThreshold)};
         })()
     """)
+    expect(header_state["enter"] > header_state["exit"] >= 0 and header_state["enter"] - header_state["exit"] >= 24, "Compact header did not expose a meaningful hysteresis band: " + json.dumps(header_state))
+    compact_trace = cdp.evaluate("""
+        (async () => {
+            const header=document.querySelector('.header');
+            const enter=Number(header.dataset.compactEnterThreshold);
+            const exit=Number(header.dataset.compactExitThreshold);
+            const transitions=[];
+            let previous=header.classList.contains('is-compact');
+            const observer=new MutationObserver(() => {
+                const current=header.classList.contains('is-compact');
+                if (current !== previous) {
+                    previous=current;
+                    transitions.push({compact:current,scrollY:window.scrollY});
+                }
+            });
+            observer.observe(header,{attributes:true,attributeFilter:['class']});
+            const settle=()=>new Promise(resolve=>setTimeout(resolve,240));
+            const move=async target=>{
+                scrollTo({top:target,left:0,behavior:'instant'});
+                await settle();
+                return {target,scrollY:window.scrollY,compact:header.classList.contains('is-compact'),height:header.getBoundingClientRect().height};
+            };
+            const samples=[];
+            samples.push(await move(0));
+            samples.push(await move(enter-2));
+            samples.push(await move(enter+2));
+            const afterEntry=transitions.length;
+            await new Promise(resolve=>setTimeout(resolve,480));
+            const afterStationary=transitions.length;
+            for (const target of [enter-1,enter+1,enter-2,enter+2,enter]) samples.push(await move(target));
+            const afterTinyMoves=transitions.length;
+            samples.push(await move(exit+2));
+            samples.push(await move(exit-2));
+            const afterExit=transitions.length;
+            samples.push(await move(460));
+            samples.push(await move(0));
+            const normalPositions=[...document.querySelectorAll('.nav-list > li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10);
+            samples.push(await move(460));
+            const compactPositions=[...document.querySelectorAll('.nav-list > li')].map(item=>Math.round(item.getBoundingClientRect().left*10)/10);
+            samples.push(await move(0));
+            observer.disconnect();
+            return {enter,exit,transitions,afterEntry,afterStationary,afterTinyMoves,afterExit,samples,normalPositions,compactPositions,overflow:document.documentElement.scrollWidth>innerWidth};
+        })()
+    """, await_promise=True)
+    expect(compact_trace["samples"][1]["compact"] is False and compact_trace["samples"][2]["compact"] is True, "Compact header did not enter once after the downward threshold crossing: " + json.dumps(compact_trace))
+    expect(compact_trace["afterEntry"] == 1 and compact_trace["afterStationary"] == 1 and compact_trace["afterTinyMoves"] == 1, "Compact header toggled while stationary or during tiny movements inside the hysteresis band: " + json.dumps(compact_trace))
+    expect(compact_trace["samples"][8]["compact"] is True and compact_trace["samples"][9]["compact"] is False and compact_trace["afterExit"] == 2, "Compact header did not remain stable until the upward exit threshold crossing: " + json.dumps(compact_trace))
+    expect(len(compact_trace["transitions"]) == 6 and [item["compact"] for item in compact_trace["transitions"]] == [True, False, True, False, True, False], "Rapid desktop scrolling caused extra compact-header transitions: " + json.dumps(compact_trace))
+    expect(compact_trace["normalPositions"] == compact_trace["compactPositions"] and not compact_trace["overflow"], "Compact-header transition shifted desktop navigation or introduced horizontal overflow: " + json.dumps(compact_trace))
+    cdp.evaluate(f"scrollTo({{top:{header_state['enter'] + 2},left:0,behavior:'instant'}})")
+    cdp.wait_for("document.querySelector('.header').classList.contains('is-compact')", 5)
+    cdp.evaluate("""
+        (() => {
+            const header=document.querySelector('.header');
+            window.__compactWheelTransitions=[];
+            window.__compactWheelPrevious=header.classList.contains('is-compact');
+            window.__compactWheelObserver=new MutationObserver(()=>{
+                const current=header.classList.contains('is-compact');
+                if(current!==window.__compactWheelPrevious){
+                    window.__compactWheelPrevious=current;
+                    window.__compactWheelTransitions.push({compact:current,scrollY:window.scrollY});
+                }
+            });
+            window.__compactWheelObserver.observe(header,{attributes:true,attributeFilter:['class']});
+        })()
+    """)
+    for wheel_delta in (-2, 1, -1, 2, -2, 1):
+        cdp.call("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": 720, "y": 320, "deltaX": 0, "deltaY": wheel_delta})
+        time.sleep(0.08)
+    time.sleep(0.3)
+    wheel_trace = cdp.evaluate("""
+        (() => {
+            window.__compactWheelObserver.disconnect();
+            const result={transitions:window.__compactWheelTransitions,compact:document.querySelector('.header').classList.contains('is-compact'),scrollY:window.scrollY};
+            delete window.__compactWheelObserver;
+            delete window.__compactWheelTransitions;
+            delete window.__compactWheelPrevious;
+            return result;
+        })()
+    """)
+    expect(wheel_trace["compact"] and wheel_trace["transitions"] == [] and wheel_trace["scrollY"] > header_state["exit"], "Tiny desktop wheel movements caused compact-header jitter: " + json.dumps(wheel_trace))
     cdp.evaluate("scrollTo(0,420)")
     cdp.wait_for(f"document.querySelector('.header').classList.contains('is-compact') && document.querySelector('.header').getBoundingClientRect().height < {header_state['normalHeight'] - 1}")
     compact_state = cdp.evaluate("({height:document.querySelector('.header').getBoundingClientRect().height,logo:document.querySelector('.logo-wrap img').getBoundingClientRect().width})")
@@ -468,12 +549,12 @@ try:
         })()
     """)
     expect(len({item["submenu"] for item in theme_signatures}) == 3 and len({item["active"] for item in theme_signatures}) == 3, "Default, Pastel, and Midnight token palettes did not restyle navigation: " + json.dumps(theme_signatures))
-    checks += 7
+    checks += 14
 
-    product_hook_url = BASE + "store.html?product=" + urllib.parse.quote(initial_public_products[0]["slug"])
-    cdp.evaluate(f"location.assign({js_string(product_hook_url)})")
+    store_url = BASE + "store.html"
+    cdp.evaluate(f"location.assign({js_string(store_url)})")
     try:
-        cdp.wait_for("location.pathname.endsWith('/store.html') && location.search.startsWith('?product=') && Boolean(document.querySelector('[data-shop-products]'))", 15)
+        cdp.wait_for("location.pathname.endsWith('/store.html') && location.search === '' && Boolean(document.querySelector('[data-shop-products]'))", 15)
     except AssertionError:
         raise AssertionError("Could not enter Store after navigation regression: " + json.dumps(cdp.evaluate("({href:location.href,ready:document.readyState,title:document.title,hasShop:Boolean(document.querySelector('[data-shop-products]')),body:document.body?.className || ''})")))
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
@@ -585,7 +666,7 @@ try:
     """)
     expect(mobile_home == {"cartDisplay": "none", "cartVisibility": "hidden", "cartTabIndex": -1, "cartHidden": "true", "overflow": False}, "Mobile Cart occupied visible or keyboard space outside Store")
     cdp.evaluate("document.querySelector('.menu-toggle').click(); document.querySelector('[data-works-toggle]').click()")
-    cdp.evaluate("new Promise(resolve=>setTimeout(resolve,250))", await_promise=True)
+    cdp.wait_for("getComputedStyle(document.querySelector('.nav')).visibility === 'visible' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 1 && getComputedStyle(document.querySelector('.nav-submenu')).display === 'grid'", 5)
     mobile_works = cdp.evaluate("""
         (() => {
             const toggle=document.querySelector('[data-works-toggle]');
@@ -1031,9 +1112,190 @@ try:
     capture_screenshot(cdp, "shop-c-desktop.png")
     checks += 9
 
+    sold_internal_fields = {
+        "sku": "TEST-UI-SOLD-" + token.upper(),
+        "slug": "test-ui-sold-" + token,
+        "title": "Sold Out Internal Detail Fixture",
+        "shortDescription": "A disposable sold-out detail fixture.",
+        "description": "A disposable internal product used to verify the sold-out Product Detail state.",
+        "category": "Regression",
+        "productType": "physical",
+        "price": "12.00",
+        "salePrice": "",
+        "stock": "0",
+        "publicationStatus": "published",
+        "storefrontVisible": "1",
+        "showWhenSoldOut": "1",
+        "featured": "0",
+        "sortOrder": "1000",
+        "purchaseAction": "internal",
+        "externalUrl": "",
+        "images": json.dumps([{"path": primary_url, "altText": "Sold-out fixture artwork", "sortOrder": 1}]),
+        "manualBadges": json.dumps([{"label": "Archive", "sortOrder": 1}]),
+    }
+    status, sold_internal_created = api_request("product", "POST", sold_internal_fields, session_id)
+    expect(status == 201, "Could not create disposable sold-out Product Detail fixture")
+    sold_internal_id = sold_internal_created["id"]
+    fixture_ids.append(sold_internal_id)
+
+    normal_product = initial_public_products[0]
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(normal_product["slug"]), "Boolean(document.querySelector('.shop-product-detail'))")
+    normal_detail = cdp.evaluate("""
+        (() => {
+            const detail=document.querySelector('.shop-product-detail');
+            const image=detail.querySelector('.shop-product-main-image');
+            const action=detail.querySelector('[data-add-cart]');
+            const store=document.querySelector('[data-nav-section="store"]');
+            return {
+                productId:Number(detail.dataset.productId),
+                title:detail.querySelector('h1').textContent.trim(),
+                pageTitle:document.title,
+                description:detail.querySelector('.shop-product-description').textContent.trim(),
+                price:detail.querySelector('.shop-product-detail-price').textContent.trim(),
+                imageLoaded:image.complete && image.naturalWidth > 0,
+                imageAlt:image.alt,
+                columns:getComputedStyle(detail).gridTemplateColumns.split(' ').length,
+                bannerDisplay:getComputedStyle(document.querySelector('.shop-banner')).display,
+                catalogDisplay:getComputedStyle(document.querySelector('[data-shop-catalog-view].shop-layout')).display,
+                cartVisible:getComputedStyle(document.querySelector('[data-open-cart]')).visibility,
+                storeCurrent:store.getAttribute('aria-current'),
+                actionText:action?.textContent.trim() || '',
+                actionHeight:action?.getBoundingClientRect().height || 0,
+                h1Count:document.querySelectorAll('main h1').length,
+                rawSkuVisible:document.body.innerText.includes(String(%d)),
+                overflow:document.documentElement.scrollWidth > innerWidth
+            };
+        })()
+    """ % normal_product["id"])
+    expect(normal_detail["productId"] == normal_product["id"] and normal_detail["title"] == normal_product["title"] and normal_detail["pageTitle"] == normal_product["title"] + " | Dyndel Pino", "Normal internal Product Detail identity or document title was incorrect")
+    expect(normal_detail["description"] == normal_product["description"] and normal_detail["price"] and normal_detail["imageLoaded"] and normal_detail["imageAlt"], "Normal Product Detail omitted its description, price, or accessible artwork")
+    expect(normal_detail["columns"] == 2 and normal_detail["bannerDisplay"] == "none" and normal_detail["catalogDisplay"] == "none" and not normal_detail["overflow"], "Desktop Product Detail layout, banner removal, or overflow was incorrect: " + json.dumps(normal_detail))
+    expect(normal_detail["cartVisible"] == "visible" and normal_detail["storeCurrent"] == "page" and normal_detail["actionText"] == "Add to Cart" and normal_detail["actionHeight"] >= 44 and normal_detail["h1Count"] == 1, "Product Detail navigation, heading, or internal action regressed")
+
+    cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
+    cdp.wait_for("Boolean(document.querySelector('.shop-product-detail [data-add-cart]'))", 15)
+    cdp.evaluate("document.querySelector('[data-add-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '1' && !document.querySelector('.shop-product-confirmation').hidden", 15)
+    add_state = cdp.evaluate("({cart:JSON.parse(localStorage.getItem('dyndelShopCart')),message:document.querySelector('.shop-product-confirmation > p').textContent,continueHref:document.querySelector('.shop-product-confirmation a').getAttribute('href')})")
+    expect(add_state["cart"] == [{"id": normal_product["id"], "quantity": 1}] and add_state["message"] == "Added to Cart." and add_state["continueHref"] == "store.html", "Product Detail Add to Cart or lightweight confirmation failed")
+    cdp.evaluate("[...document.querySelectorAll('.shop-product-confirmation button')].find(button=>button.textContent.includes('View Cart')).click()")
+    cdp.wait_for("!document.querySelector('[data-cart-panel]').hidden && Boolean(document.querySelector('.shop-cart-item'))", 15)
+    detail_cart = cdp.evaluate("({expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'),item:document.querySelector('.shop-cart-item strong').textContent,total:document.querySelector('[data-cart-total]').textContent})")
+    expect(detail_cart["expanded"] == "true" and detail_cart["item"] == normal_product["title"] and detail_cart["total"] == "$" + normal_product["currentPrice"], "Product Detail did not invoke the existing Cart behavior")
+    cdp.evaluate("document.querySelector('[data-remove-cart]').click(); document.querySelector('[data-close-cart]').click()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').hidden && document.querySelector('[data-cart-region]').hidden", 15)
+    checks += 9
+
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(v2_fields["slug"]), "document.querySelectorAll('.shop-product-thumbnail').length === 2")
+    inquiry_detail = cdp.evaluate("""
+        (() => {
+            const detail=document.querySelector('.shop-product-detail');
+            return {
+                badges:[...detail.querySelectorAll('.shop-product-detail-badges .shop-product-badge')].map(item=>item.textContent),
+                price:detail.querySelector('.shop-product-detail-price').textContent.replace(/\s+/g,' ').trim(),
+                inquiryHref:detail.querySelector('.shop-product-action').getAttribute('href'),
+                addButtons:detail.querySelectorAll('[data-add-cart]').length,
+                thumbnails:detail.querySelectorAll('.shop-product-thumbnail').length,
+                firstPressed:detail.querySelector('.shop-product-thumbnail').getAttribute('aria-pressed'),
+                firstAlt:detail.querySelector('.shop-product-main-image').alt,
+                featuredVisible:detail.innerText.includes('Featured'),
+                rawFieldsVisible:['TEST-UI-V2-','digital'].some(value=>detail.innerText.includes(value))
+            };
+        })()
+    """)
+    expect(inquiry_detail["badges"] == ["Sale", "New"] and "$18.00" in inquiry_detail["price"] and "$22.00" in inquiry_detail["price"] and not inquiry_detail["featuredVisible"], "Sale/manual badges or sale pricing were incorrect on Product Detail")
+    expect(inquiry_detail["inquiryHref"] == "index.html#contact" and inquiry_detail["addButtons"] == 0 and not inquiry_detail["rawFieldsVisible"], "Inquiry detail exposed a local-cart action or raw implementation fields")
+    expect(inquiry_detail["thumbnails"] == 2 and inquiry_detail["firstPressed"] == "true" and inquiry_detail["firstAlt"] == "Uploaded primary alt text", "Ordered gallery, active thumbnail, or stored alt text was incorrect")
+    cdp.evaluate("document.querySelectorAll('.shop-product-thumbnail')[1].focus()")
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13})
+    cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13})
+    cdp.wait_for(f"document.querySelector('.shop-product-main-image').src === {js_string(hover_url)}", 10)
+    gallery_state = cdp.evaluate("({src:document.querySelector('.shop-product-main-image').src,alt:document.querySelector('.shop-product-main-image').alt,pressed:[...document.querySelectorAll('.shop-product-thumbnail')].map(item=>item.getAttribute('aria-pressed')),focused:document.activeElement===document.querySelectorAll('.shop-product-thumbnail')[1],outline:getComputedStyle(document.activeElement).outlineStyle})")
+    expect(gallery_state["src"] == hover_url and gallery_state["pressed"] == ["false", "true"] and gallery_state["focused"] and gallery_state["outline"] != "none", "Keyboard gallery selection or active/focus state failed: " + json.dumps(gallery_state))
+
+    detail_theme_signatures = cdp.evaluate("""
+        (() => {
+            const root=document.documentElement;
+            const names=['--blue-deep','--panel-strong','--text'];
+            const original=Object.fromEntries(names.map(name=>[name,root.style.getPropertyValue(name)]));
+            const palettes=[['default','#c86f52','#fff8f3','#3d2925'],['pastel','#7968d8','#fbf8ff','#34304f'],['midnight','#8ca8ff','#171a2b','#f3f5ff']];
+            const values=palettes.map(([name,accent,surface,text])=>{
+                root.style.setProperty('--blue-deep',accent); root.style.setProperty('--panel-strong',surface); root.style.setProperty('--text',text);
+                return {name,frame:getComputedStyle(document.querySelector('.shop-product-main-frame')).backgroundColor,action:getComputedStyle(document.querySelector('.shop-product-action')).backgroundColor,title:getComputedStyle(document.querySelector('.shop-product-information h1')).color};
+            });
+            names.forEach(name=>original[name] ? root.style.setProperty(name,original[name]) : root.style.removeProperty(name));
+            return values;
+        })()
+    """)
+    expect(len({item["frame"] for item in detail_theme_signatures}) == 3 and len({item["action"] for item in detail_theme_signatures}) == 3 and len({item["title"] for item in detail_theme_signatures}) == 3, "Default, Pastel, and Midnight palettes did not restyle Product Detail: " + json.dumps(detail_theme_signatures))
+    capture_screenshot(cdp, "shop-d-product-detail-desktop.png")
+    checks += 5
+
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(storefront_fields["slug"]), "Boolean(document.querySelector('.shop-product-detail'))")
+    external_detail = cdp.evaluate("""
+        (() => {
+            const detail=document.querySelector('.shop-product-detail');
+            const action=detail.querySelector('.shop-product-action');
+            return {href:action.href,target:action.target,rel:action.rel,addButtons:detail.querySelectorAll('[data-add-cart]').length,badges:[...detail.querySelectorAll('.shop-product-badge')].map(item=>item.textContent),cart:localStorage.getItem('dyndelShopCart')};
+        })()
+    """)
+    expect(external_detail["href"] == storefront_fields["externalUrl"] and external_detail["target"] == "_blank" and set(external_detail["rel"].split()) == {"noopener", "noreferrer"}, "External Product Detail URL was not safely linked")
+    expect(external_detail["addButtons"] == 0 and external_detail["badges"] == ["Sale", "Sold Out", "Limited"] and external_detail["cart"] == "[]", "External Product Detail exposed local cart behavior or incorrect badges")
+
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(sold_internal_fields["slug"]), "Boolean(document.querySelector('.shop-product-detail'))")
+    sold_detail = cdp.evaluate("({button:document.querySelector('.shop-product-action').textContent.trim(),disabled:document.querySelector('.shop-product-action').disabled,addButtons:document.querySelectorAll('[data-add-cart]').length,badges:[...document.querySelectorAll('.shop-product-detail-badges .shop-product-badge')].map(item=>item.textContent),cart:localStorage.getItem('dyndelShopCart')})")
+    expect(sold_detail["button"] == "Sold out" and sold_detail["disabled"] and sold_detail["addButtons"] == 1 and sold_detail["badges"] == ["Sold Out", "Archive"] and sold_detail["cart"] == "[]", "Sold-out internal detail did not remain visible with a disabled purchase action")
+
+    status, _ = api_request("product", "POST", {"id": sold_internal_id, "publicationStatus": "draft"}, session_id)
+    expect(status == 200, "Could not set Product Detail fixture to draft")
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(sold_internal_fields["slug"]), "Boolean(document.querySelector('.shop-product-state h1'))")
+    draft_state = cdp.evaluate("({heading:document.querySelector('.shop-product-state h1').textContent,body:document.querySelector('.shop-product-state').textContent,title:document.title,rawError:document.body.innerText.includes('404')})")
+    expect(draft_state["heading"] == "Artwork not found." and "Back to Store" in draft_state["body"] and draft_state["title"].startswith("Artwork not found") and not draft_state["rawError"], "Draft Product Detail did not return a friendly not-found state")
+    status, _ = api_request("product", "POST", {"id": sold_internal_id, "publicationStatus": "published", "showWhenSoldOut": "0"}, session_id)
+    expect(status == 200, "Could not set Product Detail fixture to unavailable")
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(sold_internal_fields["slug"]), "Boolean(document.querySelector('.shop-product-state h1'))")
+    expect(cdp.evaluate("document.querySelector('.shop-product-state h1').textContent") == "Artwork not found.", "Unavailable sold-out Product Detail was publicly rendered")
+    cdp.navigate(BASE + "store.html?product=missing-" + token, "Boolean(document.querySelector('.shop-product-state h1'))")
+    expect(cdp.evaluate("document.querySelector('.shop-product-state h1').textContent === 'Artwork not found.' && !document.body.innerText.includes('Product not found.')") is True, "Invalid Product Detail exposed a raw API error")
+    checks += 8
+
+    status, _ = api_request("delete-product", "POST", {"id": sold_internal_id}, session_id)
+    expect(status == 200, "Could not remove disposable sold-out Product Detail fixture")
+    fixture_ids.remove(sold_internal_id)
+
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
+
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(v2_fields["slug"]), "document.querySelectorAll('.shop-product-thumbnail').length === 2")
+    mobile_detail = cdp.evaluate("""
+        (() => {
+            const detail=document.querySelector('.shop-product-detail');
+            const thumb=detail.querySelector('.shop-product-thumbnail').getBoundingClientRect();
+            const action=detail.querySelector('.shop-product-action').getBoundingClientRect();
+            const image=detail.querySelector('.shop-product-main-image');
+            return {
+                columns:getComputedStyle(detail).gridTemplateColumns.split(' ').length,
+                thumbWidth:thumb.width,thumbHeight:thumb.height,actionHeight:action.height,
+                imageLoaded:image.complete && image.naturalWidth > 0,
+                bannerDisplay:getComputedStyle(document.querySelector('.shop-banner')).display,
+                cartVisible:getComputedStyle(document.querySelector('[data-open-cart]')).visibility,
+                menuDisplay:getComputedStyle(document.querySelector('.menu-toggle')).display,
+                mascotDisplay:getComputedStyle(document.querySelector('.contact-mascot')).display,
+                overflow:document.documentElement.scrollWidth > innerWidth
+            };
+        })()
+    """)
+    expect(mobile_detail["columns"] == 1 and mobile_detail["thumbWidth"] >= 44 and mobile_detail["thumbHeight"] >= 44 and mobile_detail["actionHeight"] >= 44 and mobile_detail["imageLoaded"], "Mobile Product Detail did not stack with usable gallery/action targets: " + json.dumps(mobile_detail))
+    expect(mobile_detail["bannerDisplay"] == "none" and mobile_detail["cartVisible"] == "visible" and mobile_detail["menuDisplay"] != "none" and mobile_detail["mascotDisplay"] == "none" and not mobile_detail["overflow"], "Mobile Product Detail navigation, decoration, banner, or overflow regressed")
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    cdp.wait_for("document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'visible' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 1", 5)
+    cdp.evaluate("document.querySelector('.menu-toggle').click()")
+    cdp.wait_for("!document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'hidden'", 5)
+    capture_screenshot(cdp, "shop-d-product-detail-mobile.png")
+    checks += 3
+
+    cdp.navigate(BASE + "store.html", "document.querySelectorAll('.shop-product').length === 5")
     mobile_storefront = cdp.evaluate(f"""
         (async () => {{
             const card=document.querySelector('[data-product-id="{storefront_id}"]');

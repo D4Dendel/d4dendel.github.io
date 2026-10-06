@@ -191,10 +191,12 @@ try {
     $checks += 8;
 
     [$status] = test_request('shop-product', 'GET', ['slug' => $created['hidden']['slug']]);
-    test_expect($status === 200, 'Published hidden product detail was not available.');
+    test_expect($status === 404, 'Storefront-hidden product detail was publicly available.');
+    [$status] = test_request('shop-product', 'GET', ['slug' => $created['sold-hidden']['slug']]);
+    test_expect($status === 404, 'Hidden sold-out product detail was publicly available.');
     [$status] = test_request('shop-product', 'GET', ['slug' => $created['draft']['slug']]);
     test_expect($status === 404, 'Draft product detail was publicly available.');
-    $checks += 2;
+    $checks += 3;
 
     $invalidCases = [
         test_product_fields($token, 'bad-url', ['purchaseAction' => 'external', 'externalUrl' => 'ftp://example.com/file']),

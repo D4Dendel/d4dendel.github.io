@@ -4,11 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shop | Dyndel Pino</title>
+    <meta name="description" content="Browse original artwork and studio pieces by Dyndel Pino." data-shop-meta-description>
+    <script>
+        try {
+            const productSlug = new URLSearchParams(window.location.search).get('product');
+            if (productSlug && productSlug.trim()) document.documentElement.classList.add('has-shop-product-route');
+        } catch (error) {}
+    </script>
     <link rel="icon" type="image/png" href="img/icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261005.nav2">
+    <link rel="stylesheet" href="css/style.css?v=20261006.shopd">
 </head>
 <body class="shop-page">
     <header class="header">
@@ -42,7 +49,7 @@
     </div>
 </header>
 
-    <section class="shop-banner" aria-labelledby="shop-title">
+    <section class="shop-banner" aria-labelledby="shop-title" data-shop-catalog-view>
         <div class="shop-banner-copy">
             <p class="eyebrow">Dyndel artist shop</p>
             <h1 id="shop-title">Art for your everyday.</h1>
@@ -51,9 +58,8 @@
     </section>
 
     <main class="page-shell category-page">
-        <section class="shop-layout" aria-label="Shop catalog">
-            <aside class="shop-cart-column" data-cart-region aria-label="Shopping cart" hidden>
-                <div class="shop-cart" id="shop-cart-panel" data-cart-panel hidden>
+        <aside class="shop-cart-column" data-cart-region aria-label="Shopping cart" hidden>
+            <div class="shop-cart" id="shop-cart-panel" data-cart-panel hidden>
                 <div class="shop-cart-header"><h2>Your cart</h2><button class="icon-button" type="button" data-close-cart aria-label="Close cart">&times;</button></div>
                 <div data-cart-items></div>
                 <div class="shop-cart-total"><span>Total</span><strong data-cart-total>$0.00</strong></div>
@@ -65,17 +71,25 @@
                     <p class="shop-form-message" data-checkout-message role="status"></p>
                     <button class="btn btn-primary" type="submit">Place order</button>
                 </form>
-                </div>
-            </aside>
+            </div>
+        </aside>
+        <section class="shop-layout" aria-label="Shop catalog" data-shop-catalog-view>
             <div class="shop-catalog" data-shop-products aria-live="polite"></div>
         </section>
-
+        <section class="shop-product-detail-view" data-shop-detail-view aria-live="polite" aria-busy="true">
+            <div data-product-detail>
+                <div class="shop-product-state">
+                    <p class="eyebrow">Artist shop</p>
+                    <p class="shop-product-state-message">Loading artwork&hellip;</p>
+                </div>
+            </div>
+        </section>
     </main>
 
     <footer class="footer">
         <p>© 2026 Dyndel Pino</p>
     </footer>
 
-    <script src="script.js?v=20261005.nav2"></script>
+    <script src="script.js?v=20261006.shopd"></script>
 </body>
 </html>
