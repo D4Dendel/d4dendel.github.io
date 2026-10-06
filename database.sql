@@ -179,10 +179,13 @@ CREATE TABLE IF NOT EXISTS shop_orders (
     status VARCHAR(30) NOT NULL DEFAULT 'pending',
     order_origin ENUM('legacy', 'checkout_v2') NOT NULL DEFAULT 'legacy',
     payment_status ENUM('unpaid', 'pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'unpaid',
+    checkout_attempt_token CHAR(64) NULL,
+    checkout_payload_hash CHAR(64) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_shop_orders_lifecycle (status, payment_status, created_at, id),
     KEY idx_shop_orders_customer_email (customer_email, created_at, id),
+    UNIQUE KEY uq_shop_orders_checkout_attempt (checkout_attempt_token),
     CONSTRAINT fk_shop_orders_shipping_method
         FOREIGN KEY (shipping_method_id) REFERENCES shop_shipping_methods(id) ON DELETE SET NULL,
     CONSTRAINT chk_shop_orders_currency CHECK (currency = 'USD'),

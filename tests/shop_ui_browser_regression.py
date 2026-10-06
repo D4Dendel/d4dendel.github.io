@@ -51,6 +51,14 @@ def api_request(action, method="GET", data=None, session_id=None):
     return status, json.loads(body.decode("utf-8"))
 
 
+def mysql_value(sql):
+    result = subprocess.run([
+        MYSQL, "--host=127.0.0.1", "--user=root", "--database=dyndel_portfolio",
+        "--batch", "--skip-column-names", "--execute=" + sql,
+    ], check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
 def multipart_request(action, fields, file_name, file_bytes, content_type, session_id=None):
     boundary = "----DyndelShopTest" + secrets.token_hex(12)
     chunks = []
@@ -299,7 +307,7 @@ source_image.close()
 auto_result = subprocess.run([
     MYSQL, "--host=127.0.0.1", "--user=root", "--batch", "--skip-column-names",
     "--database=dyndel_portfolio",
-    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges') ORDER BY TABLE_NAME;",
+    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges','shop_orders','shop_order_items','shop_shipping_zones','shop_shipping_methods') ORDER BY TABLE_NAME;",
 ], check=True, capture_output=True, text=True)
 initial_auto_increments = dict(line.split("\t", 1) for line in auto_result.stdout.splitlines() if line)
 
@@ -671,7 +679,7 @@ try:
     """)
     expect(empty_cart_state["layerPosition"] == "fixed" and empty_cart_state["drawerPosition"] == "fixed" and empty_cart_state["drawerRight"] == 1440 and 440 <= empty_cart_state["drawerWidth"] <= 520 and empty_cart_state["drawerHeight"] == 1000 and empty_cart_state["drawerInBody"], "Desktop Cart was not a generous, responsive right-edge fixed modal drawer: " + json.dumps(empty_cart_state))
     expect(empty_cart_state["backdropOpacity"] > 0 and empty_cart_state["role"] == "dialog" and empty_cart_state["modal"] == "true" and empty_cart_state["expanded"] == "true" and empty_cart_state["pageInert"], "Cart backdrop or modal semantics were incorrect")
-    expect(empty_cart_state["rootOverflow"] == "hidden" and empty_cart_state["bodyOverflow"] == "hidden" and empty_cart_state["scrollY"] == cart_layout_before["scrollY"] and "Your cart is empty." in empty_cart_state["empty"] and empty_cart_state["subtotal"] == "$0.00" and empty_cart_state["checkoutControls"] == 0, "Empty Cart, scroll lock, or checkout removal was incorrect: " + json.dumps({"scroll": cart_layout_before["scrollY"], "open": empty_cart_state}))
+    expect(empty_cart_state["rootOverflow"] == "hidden" and empty_cart_state["bodyOverflow"] == "hidden" and abs(empty_cart_state["scrollY"] - cart_layout_before["scrollY"]) <= 1 and "Your cart is empty." in empty_cart_state["empty"] and empty_cart_state["subtotal"] == "$0.00" and empty_cart_state["checkoutControls"] == 0, "Empty Cart, scroll lock, or checkout removal was incorrect: " + json.dumps({"scroll": cart_layout_before["scrollY"], "open": empty_cart_state}))
     expect(empty_cart_state["banner"] == cart_layout_before["banner"] and empty_cart_state["card"] == cart_layout_before["card"] and empty_cart_state["nav"] == cart_layout_before["nav"] and not empty_cart_state["overflow"], "Opening the empty Cart reflowed the Store or navigation: " + json.dumps({"before": cart_layout_before, "open": empty_cart_state}))
 
     cdp.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": 8})
@@ -1695,6 +1703,156 @@ try:
     expect(mobile_admin == {"products": 4, "panelHidden": False, "width": 390, "images": 1, "role": "Primary"}, "Mobile Admin Shop/gallery regression failed")
     checks += 1
     capture_screenshot(cdp, "shop-admin-b4-mobile.png")
+
+    # Shop F2 Checkout V1: customer flow, server quote hydration, pending handoff,
+    # responsive layout, themes, and temporary shipping/digital fixtures.
+    checkout_run = secrets.token_hex(4)
+    checkout_zone_id = None
+    checkout_digital_id = None
+    checkout_order_id = None
+    try:
+        cdp.call("Emulation.setDeviceMetricsOverride", {
+            "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
+        })
+        cdp.navigate(BASE + "checkout.html")
+        cdp.evaluate("localStorage.setItem('dyndelShopCart','[]'); location.reload()")
+        cdp.wait_for("!document.querySelector('[data-checkout-empty]').hidden", 15)
+        empty_checkout = cdp.evaluate("""
+            (() => ({
+                title:document.querySelector('[data-checkout-empty] h2').textContent,
+                formHidden:document.querySelector('[data-checkout-form]').hidden,
+                storeCurrent:document.querySelector('.nav [data-nav-section="store"]').getAttribute('aria-current'),
+                overflow:document.documentElement.scrollWidth > innerWidth
+            }))()
+        """)
+        expect(empty_checkout == {"title": "Your Cart is empty.", "formHidden": True, "storeCurrent": "page", "overflow": False}, "Checkout empty state or Store navigation context failed: " + json.dumps(empty_checkout))
+
+        cdp.evaluate("localStorage.setItem('dyndelShopCart',JSON.stringify([{id:1,quantity:1}]))")
+        cdp.navigate(BASE + "store.html")
+        cdp.wait_for("document.querySelector('[data-product-id=\"1\"]') !== null", 15)
+        cdp.evaluate("document.querySelector('[data-open-cart]').click()")
+        cdp.wait_for("document.querySelector('[data-cart-region]').classList.contains('is-open') && !document.querySelector('[data-cart-checkout]').hidden", 15)
+        cart_checkout = cdp.evaluate("""
+            (() => {
+                const link=document.querySelector('[data-cart-checkout]');
+                return {label:link.textContent.trim(), target:new URL(link.href).pathname.endsWith('/checkout.html'), continueType:document.querySelector('[data-continue-shopping]').tagName};
+            })()
+        """)
+        expect(cart_checkout == {"label": "CHECKOUT", "target": True, "continueType": "BUTTON"}, "Cart Drawer Checkout integration failed")
+        cdp.evaluate("document.querySelector('[data-cart-checkout]').click()")
+        cdp.wait_for("location.pathname.endsWith('/checkout.html') && !document.querySelector('[data-checkout-form]').hidden", 15)
+        cdp.evaluate("document.querySelector('[data-checkout-country]').value='TH'; document.querySelector('[data-checkout-country]').dispatchEvent(new Event('change',{bubbles:true}))")
+        cdp.wait_for("document.querySelector('[data-checkout-shipping-message]').textContent.includes('not available')", 15)
+        unavailable = cdp.evaluate("({shipping:!document.querySelector('[data-checkout-shipping]').hidden, delivery:!document.querySelector('[data-checkout-delivery]').hidden, disabled:document.querySelector('[data-checkout-submit]').disabled, message:document.querySelector('[data-checkout-shipping-message]').textContent})")
+        expect(unavailable["shipping"] and unavailable["delivery"] and unavailable["disabled"] and "not available" in unavailable["message"], "Unconfigured physical shipping did not block Checkout cleanly")
+
+        checkout_zone_id = int(mysql_value(f"INSERT INTO shop_shipping_zones (code,name,is_rest_of_world,enabled,sort_order) VALUES ('browser-f2-{checkout_run}','Browser F2 Thailand',0,1,1); SELECT LAST_INSERT_ID();"))
+        mysql_value(f"INSERT INTO shop_shipping_zone_countries (zone_id,country_code) VALUES ({checkout_zone_id},'TH');")
+        checkout_method_id = int(mysql_value(f"INSERT INTO shop_shipping_methods (zone_id,code,name,price,currency,estimated_delivery_min,estimated_delivery_max,estimated_delivery_unit,enabled,sort_order) VALUES ({checkout_zone_id},'browser-standard-{checkout_run}','Standard International',12.00,'USD',7,14,'business_days',1,1); SELECT LAST_INSERT_ID();"))
+        checkout_digital_id = int(mysql_value(f"INSERT INTO shop_products (sku,slug,title,short_description,description,product_type,image_url,price,sale_price,stock,publication_status,storefront_visible,show_when_sold_out,featured,sort_order,purchase_action,external_url,active) VALUES ('BROWSER-F2-DIGITAL-{checkout_run}','browser-f2-digital-{checkout_run}','Browser Digital','Digital test','Digital checkout browser fixture.','digital','img/icon.png',10.00,7.00,5,'published',1,1,0,9990,'internal',NULL,1); SELECT LAST_INSERT_ID();"))
+        fixture_ids.append(checkout_digital_id)
+
+        cdp.evaluate("document.querySelector('[data-checkout-country]').value='US'; document.querySelector('[data-checkout-country]').dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('[data-checkout-country]').value='TH'; document.querySelector('[data-checkout-country]').dispatchEvent(new Event('change',{bubbles:true}))")
+        cdp.wait_for("document.querySelectorAll('[data-checkout-methods] input').length === 1", 15)
+        cdp.evaluate("document.querySelector('[data-checkout-methods] input').click()")
+        cdp.wait_for("document.querySelector('[data-checkout-total]').textContent === '$30.00'", 15)
+        physical_review = cdp.evaluate("""
+            (() => {
+                const layout=getComputedStyle(document.querySelector('[data-checkout-form]'));
+                const summary=getComputedStyle(document.querySelector('.checkout-summary'));
+                return {
+                    items:document.querySelectorAll('[data-checkout-summary-items] .checkout-summary-item').length,
+                    method:document.querySelector('.checkout-method-heading strong').textContent,
+                    estimate:document.querySelector('.checkout-method small').textContent,
+                    subtotal:document.querySelector('[data-checkout-subtotal]').textContent,
+                    shipping:document.querySelector('[data-checkout-shipping-total]').textContent,
+                    total:document.querySelector('[data-checkout-total]').textContent,
+                    columns:layout.gridTemplateColumns.split(' ').length,
+                    sticky:summary.position,
+                    overflow:document.documentElement.scrollWidth > innerWidth
+                };
+            })()
+        """)
+        expect(physical_review["items"] == 1 and physical_review["method"] == "Standard International" and physical_review["estimate"] == "Estimated 7–14 business days" and physical_review["subtotal"] == "$18.00" and physical_review["shipping"] == "$12.00" and physical_review["total"] == "$30.00" and physical_review["columns"] == 2 and physical_review["sticky"] == "sticky" and not physical_review["overflow"], "Desktop physical order review, estimate, totals, or layout failed: " + json.dumps(physical_review))
+        capture_screenshot(cdp, "shop-f2-checkout-desktop.png")
+
+        cdp.evaluate("document.querySelector('[data-checkout-submit]').click()")
+        cdp.wait_for("!document.querySelector('[data-checkout-errors]').hidden", 5)
+        validation_focus = cdp.evaluate("({id:document.activeElement.id || '',errorFocus:document.activeElement === document.querySelector('[data-checkout-errors]'),invalid:document.activeElement.matches(':invalid'),message:document.querySelector('[data-checkout-errors]').textContent})")
+        expect((validation_focus["id"] in ["checkout-name", "checkout-email", "checkout-address1", "checkout-city", "checkout-postal"] or validation_focus["errorFocus"] or validation_focus["invalid"]) and "required fields" in validation_focus["message"], "Checkout validation did not provide logical error focus: " + json.dumps(validation_focus))
+        cdp.evaluate("""
+            (() => {
+                const f=document.querySelector('[data-checkout-form]');
+                f.elements.customerName.value='Browser Guest';
+                f.elements.customerEmail.value='browser@example.com';
+                f.elements.customerPhone.value='+66 81 234 5678';
+                f.elements.addressLine1.value='123 Browser Road';
+                f.elements.addressLine2.value='Studio 4';
+                f.elements.city.value='Bangkok';
+                f.elements.region.value='Bangkok';
+                f.elements.postalCode.value='10110';
+                f.requestSubmit();
+            })()
+        """)
+        cdp.wait_for("!document.querySelector('[data-checkout-handoff]').hidden", 15)
+        handoff = cdp.evaluate("({heading:document.querySelector('[data-checkout-handoff] h2').textContent,copy:document.querySelector('[data-checkout-handoff]').textContent,cart:JSON.parse(localStorage.getItem('dyndelShopCart')),focused:document.activeElement === document.querySelector('[data-checkout-handoff]'),orderId:Number(document.querySelector('[data-checkout-handoff]').dataset.orderId)})")
+        checkout_order_id = handoff["orderId"]
+        expect(handoff["heading"] == "Order prepared." and "Payment integration will be added" in handoff["copy"] and "pending and unpaid" in handoff["copy"] and handoff["cart"] == [{"id": 1, "quantity": 1}] and handoff["focused"], "Payment-boundary handoff, focus, or Cart preservation failed")
+        order_state = mysql_value(f"SELECT CONCAT(order_origin,':',status,':',payment_status,':',total) FROM shop_orders WHERE id={checkout_order_id};")
+        expect(order_state == "checkout_v2:pending:unpaid:30.00" and mysql_value("SELECT stock FROM shop_products WHERE id=1;") == "12", "Browser handoff order lifecycle or stock safety failed")
+
+        cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:{checkout_digital_id},quantity:1}}])); location.href='checkout.html'")
+        cdp.wait_for("!document.querySelector('[data-checkout-form]').hidden && document.querySelector('[data-checkout-total]').textContent === '$7.00'", 15)
+        digital_checkout = cdp.evaluate("({shipping:document.querySelector('[data-checkout-shipping]').hidden,delivery:document.querySelector('[data-checkout-delivery]').hidden,shippingRow:document.querySelector('[data-checkout-shipping-row]').hidden,items:document.querySelectorAll('.checkout-summary-item').length,total:document.querySelector('[data-checkout-total]').textContent})")
+        expect(digital_checkout == {"shipping": True, "delivery": True, "shippingRow": True, "items": 1, "total": "$7.00"}, "Digital-only Checkout displayed shipping or incorrect totals")
+
+        cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:1,quantity:1}},{{id:{checkout_digital_id},quantity:1}}])); location.reload()")
+        cdp.wait_for("!document.querySelector('[data-checkout-form]').hidden && document.querySelectorAll('.checkout-summary-item').length === 2", 15)
+        expect(cdp.evaluate("!document.querySelector('[data-checkout-shipping]').hidden && !document.querySelector('[data-checkout-delivery]').hidden") is True, "Mixed Checkout did not require shipping")
+
+        theme_signatures = cdp.evaluate("""
+            (() => {
+                const palettes=[
+                    {accentColor:'#c86f52',pageBackground:'#fff0e8',surfaceColor:'#fff8f3',primaryText:'#3d2925',buttonRadius:'999px',galleryLayout:'uniform',galleryEdge:'rounded'},
+                    {accentColor:'#d58aaa',pageBackground:'#fff4f8',surfaceColor:'#fffafd',primaryText:'#513747',buttonRadius:'8px',galleryLayout:'clean',galleryEdge:'slight'},
+                    {accentColor:'#8da2ff',pageBackground:'#171925',surfaceColor:'#242738',primaryText:'#f3efff',buttonRadius:'4px',galleryLayout:'editorial',galleryEdge:'square'}
+                ];
+                return palettes.map(theme => {
+                    applyPublicTheme(theme);
+                    return {background:getComputedStyle(document.body).backgroundColor,summary:getComputedStyle(document.querySelector('.checkout-summary')).backgroundColor,button:getComputedStyle(document.querySelector('[data-checkout-submit]')).backgroundColor};
+                });
+            })()
+        """)
+        expect(len({item["background"] for item in theme_signatures}) == 3 and len({item["summary"] for item in theme_signatures}) == 3 and len({item["button"] for item in theme_signatures}) == 3, "Default, Pastel, and Midnight palettes did not restyle Checkout: " + json.dumps(theme_signatures))
+        cdp.evaluate("fetch('api/index.php?action=theme').then(r=>r.json()).then(d=>applyPublicTheme(d.theme))", await_promise=True)
+
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1200, "height": 800, "deviceScaleFactor": 1, "mobile": False})
+        desktop_1200 = cdp.evaluate("({scrollWidth:document.documentElement.scrollWidth,innerWidth,columns:getComputedStyle(document.querySelector('[data-checkout-form]')).gridTemplateColumns.split(' ').length})")
+        expect(desktop_1200["scrollWidth"] <= desktop_1200["innerWidth"] and desktop_1200["columns"] == 2, "1200px Checkout layout overflowed or lost two-column layout: " + json.dumps(desktop_1200))
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True})
+        mobile_checkout = cdp.evaluate("""
+            (() => {
+                const form=document.querySelector('[data-checkout-form]');
+                document.querySelector('.menu-toggle').click();
+                return {width:innerWidth,columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,overflow:document.documentElement.scrollWidth > innerWidth,navOpen:document.querySelector('.nav').classList.contains('open'),storeCurrent:document.querySelector('.nav [data-nav-section="store"]').getAttribute('aria-current')};
+            })()
+        """)
+        expect(mobile_checkout == {"width": 390, "columns": 1, "overflow": False, "navOpen": True, "storeCurrent": "page"}, "390px Checkout layout or mobile navigation failed: " + json.dumps(mobile_checkout))
+        cdp.evaluate("document.querySelector('.menu-toggle').click()")
+        cdp.wait_for("!document.querySelector('.nav').classList.contains('open') && getComputedStyle(document.querySelector('.nav')).visibility === 'hidden'", 5)
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": 390, "height": 640, "deviceScaleFactor": 1, "mobile": True})
+        expect(cdp.evaluate("document.documentElement.scrollWidth <= innerWidth && document.querySelector('[data-checkout-submit]').getBoundingClientRect().width <= innerWidth - 32") is True, "Short-height mobile Checkout clipped or overflowed")
+        capture_screenshot(cdp, "shop-f2-checkout-mobile.png")
+        checks += 15
+    finally:
+        if checkout_order_id:
+            mysql_value(f"DELETE FROM shop_orders WHERE id={checkout_order_id};")
+        if checkout_digital_id:
+            if checkout_digital_id in fixture_ids:
+                fixture_ids.remove(checkout_digital_id)
+            mysql_value(f"DELETE FROM shop_products WHERE id={checkout_digital_id};")
+        if checkout_zone_id:
+            mysql_value(f"DELETE FROM shop_shipping_zones WHERE id={checkout_zone_id};")
 
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1

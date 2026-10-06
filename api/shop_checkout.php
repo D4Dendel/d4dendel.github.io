@@ -52,10 +52,21 @@ function shop_checkout_quote(PDO $pdo, mixed $rawItems, mixed $rawCountryCode = 
     $shippingMethodId = shop_checkout_shipping_method_id($rawShippingMethodId);
 
     $productStmt = $pdo->prepare(
-        'SELECT id, sku, title, product_type, price, sale_price, stock,
-                publication_status, storefront_visible, purchase_action
-         FROM shop_products
-         WHERE id = ?
+        'SELECT product.id, product.sku, product.title, product.product_type,
+                product.price, product.sale_price, product.stock,
+                product.publication_status, product.storefront_visible,
+                product.purchase_action, product.image_url,
+                image.image_path, image.alt_text
+         FROM shop_products AS product
+         LEFT JOIN shop_product_images AS image
+           ON image.id = (
+               SELECT first_image.id
+               FROM shop_product_images AS first_image
+               WHERE first_image.product_id = product.id
+               ORDER BY first_image.sort_order ASC, first_image.id ASC
+               LIMIT 1
+           )
+         WHERE product.id = ?
          LIMIT 1'
     );
 
@@ -95,6 +106,8 @@ function shop_checkout_quote(PDO $pdo, mixed $rawItems, mixed $rawCountryCode = 
             'unitPrice' => shop_money_from_cents($unitCents),
             'lineTotal' => shop_money_from_cents($lineCents),
             'currency' => SHOP_CURRENCY,
+            'image' => $product['image_path'] ?: $product['image_url'],
+            'imageAlt' => $product['alt_text'] ?? '',
         ];
     }
 
@@ -190,4 +203,167 @@ function shop_checkout_quote(PDO $pdo, mixed $rawItems, mixed $rawCountryCode = 
     $quote['shipping']['amount'] = shop_money_from_cents($shippingCents);
     $quote['total'] = shop_money_from_cents($subtotalCents + $shippingCents);
     return $quote;
+}
+
+function shop_checkout_attempt_token(mixed $value): string
+{
+    if (!is_string($value)) json_response(['error' => 'Checkout attempt token must be text.'], 422);
+    $token = trim($value);
+    if (!preg_match('/\A[A-Za-z0-9-]{32,64}\z/D', $token)) {
+        json_response(['error' => 'Checkout attempt token is invalid.'], 422);
+    }
+    return $token;
+}
+
+function shop_checkout_phone(mixed $value): ?string
+{
+    $phone = shop_optional_text($value, 'Phone', 40);
+    if ($phone !== null && !preg_match('/\A[0-9+().\-\s]{5,40}\z/D', $phone)) {
+        json_response(['error' => 'Enter a valid phone number.'], 422);
+    }
+    return $phone;
+}
+
+/** Create an unpaid Checkout V2 order from a freshly rebuilt quote. */
+function shop_checkout_create_order(PDO $pdo, array $input): array
+{
+    $attemptToken = shop_checkout_attempt_token($input['attemptToken'] ?? null);
+    $customerName = shop_text($input['customerName'] ?? null, 'Full name', 160, false);
+    $emailValue = shop_text($input['customerEmail'] ?? null, 'Email', 190, false);
+    $customerEmail = filter_var($emailValue, FILTER_VALIDATE_EMAIL);
+    if ($customerEmail === false) json_response(['error' => 'Enter a valid email address.'], 422);
+    $customerPhone = shop_checkout_phone($input['customerPhone'] ?? null);
+
+    $countryCode = shop_checkout_country_code($input['countryCode'] ?? null);
+    $shippingMethodId = shop_checkout_shipping_method_id($input['shippingMethodId'] ?? null);
+    $addressLine1 = shop_optional_text($input['addressLine1'] ?? null, 'Address line 1', 255);
+    $addressLine2 = shop_optional_text($input['addressLine2'] ?? null, 'Address line 2', 255);
+    $city = shop_optional_text($input['city'] ?? null, 'City', 120);
+    $region = shop_optional_text($input['region'] ?? null, 'State, province, or region', 120);
+    $postalCode = shop_optional_text($input['postalCode'] ?? null, 'Postal or ZIP code', 32);
+
+    $pdo->beginTransaction();
+    try {
+        $quote = shop_checkout_quote($pdo, $input['items'] ?? null, $countryCode, $shippingMethodId);
+        if ($quote['shippingRequired']) {
+            if ($countryCode === null || $addressLine1 === null || $city === null || $postalCode === null) {
+                json_response(['error' => 'Complete the required shipping address fields.'], 422);
+            }
+            if (!$quote['shipping']['destinationSupported']) {
+                json_response(['error' => 'Shipping is not available for this destination yet.'], 422);
+            }
+            if ($quote['shipping']['selectedMethod'] === null || $quote['total'] === null) {
+                json_response(['error' => 'Choose an available shipping method.'], 422);
+            }
+        } elseif ($countryCode !== null || $shippingMethodId !== null || $addressLine1 !== null
+            || $addressLine2 !== null || $city !== null || $region !== null || $postalCode !== null) {
+            json_response(['error' => 'Digital-only orders do not use shipping details.'], 422);
+        }
+
+        $payloadHash = hash('sha256', json_encode([
+            'customer' => [$customerName, $customerEmail, $customerPhone],
+            'shipping' => [$countryCode, $addressLine1, $addressLine2, $city, $region, $postalCode, $shippingMethodId],
+            'quote' => $quote,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+
+        $existingStmt = $pdo->prepare(
+            'SELECT id, currency, status, payment_status, total, checkout_payload_hash
+             FROM shop_orders WHERE checkout_attempt_token = ? LIMIT 1'
+        );
+        $existingStmt->execute([$attemptToken]);
+        $existing = $existingStmt->fetch();
+        if ($existing) {
+            if (!hash_equals((string)$existing['checkout_payload_hash'], $payloadHash)) {
+                $pdo->rollBack();
+                json_response(['error' => 'This Checkout attempt was already used with different details. Refresh Checkout and try again.'], 409);
+            }
+            $pdo->commit();
+            return [
+                'id' => (int)$existing['id'],
+                'currency' => $existing['currency'],
+                'status' => $existing['status'],
+                'paymentStatus' => $existing['payment_status'],
+                'total' => $existing['total'],
+                'prepared' => true,
+                'duplicate' => true,
+            ];
+        }
+
+        $selectedMethod = $quote['shipping']['selectedMethod'];
+        $estimate = $selectedMethod['estimatedDelivery'] ?? null;
+        $orderStmt = $pdo->prepare(
+            'INSERT INTO shop_orders
+             (customer_name, customer_email, customer_phone, customer_address, currency, shipping_required,
+              shipping_address_line1, shipping_address_line2, shipping_city, shipping_region,
+              shipping_postal_code, shipping_country_code, shipping_method_id, shipping_method_name,
+              shipping_estimate_min, shipping_estimate_max, shipping_estimate_unit,
+              subtotal, shipping_amount, tax_amount, discount_amount, total, status, order_origin,
+              payment_status, checkout_attempt_token, checkout_payload_hash)
+             VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00, ?, ?, ?, ?, ?, ?)'
+        );
+        $orderStmt->execute([
+            $customerName, $customerEmail, $customerPhone, SHOP_CURRENCY,
+            $quote['shippingRequired'] ? 1 : 0,
+            $quote['shippingRequired'] ? $addressLine1 : null,
+            $quote['shippingRequired'] ? $addressLine2 : null,
+            $quote['shippingRequired'] ? $city : null,
+            $quote['shippingRequired'] ? $region : null,
+            $quote['shippingRequired'] ? $postalCode : null,
+            $quote['shippingRequired'] ? $countryCode : null,
+            $selectedMethod['id'] ?? null,
+            $selectedMethod['name'] ?? null,
+            $estimate['minimum'] ?? null,
+            $estimate['maximum'] ?? null,
+            $estimate['unit'] ?? null,
+            $quote['subtotal'],
+            $quote['shipping']['amount'],
+            $quote['total'],
+            'pending', 'checkout_v2', 'unpaid', $attemptToken, $payloadHash,
+        ]);
+        $orderId = (int)$pdo->lastInsertId();
+        $itemStmt = $pdo->prepare(
+            'INSERT INTO shop_order_items
+             (order_id, product_id, product_sku, product_name, product_type, currency, quantity, price, line_total)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($quote['items'] as $item) {
+            $itemStmt->execute([
+                $orderId, $item['productId'], $item['sku'], $item['name'], $item['productType'],
+                SHOP_CURRENCY, $item['quantity'], $item['unitPrice'], $item['lineTotal'],
+            ]);
+        }
+        $pdo->commit();
+        return [
+            'id' => $orderId,
+            'currency' => SHOP_CURRENCY,
+            'status' => 'pending',
+            'paymentStatus' => 'unpaid',
+            'total' => $quote['total'],
+            'prepared' => true,
+            'duplicate' => false,
+        ];
+    } catch (PDOException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (($error->errorInfo[1] ?? null) === 1062) {
+            $existingStmt = $pdo->prepare(
+                'SELECT id, currency, status, payment_status, total, checkout_payload_hash
+                 FROM shop_orders WHERE checkout_attempt_token = ? LIMIT 1'
+            );
+            $existingStmt->execute([$attemptToken]);
+            $existing = $existingStmt->fetch();
+            if ($existing && hash_equals((string)$existing['checkout_payload_hash'], $payloadHash ?? '')) {
+                return [
+                    'id' => (int)$existing['id'], 'currency' => $existing['currency'],
+                    'status' => $existing['status'], 'paymentStatus' => $existing['payment_status'],
+                    'total' => $existing['total'], 'prepared' => true, 'duplicate' => true,
+                ];
+            }
+        }
+        error_log('Shop Checkout V2 order failed: ' . $error->getMessage());
+        json_response(['error' => 'The order could not be prepared. Please try again.'], 500);
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Unexpected Shop Checkout V2 failure: ' . $error->getMessage());
+        json_response(['error' => 'The order could not be prepared. Please try again.'], 500);
+    }
 }

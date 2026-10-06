@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout | Dyndel Pino</title>
+    <meta name="description" content="Review your Dyndel artist shop order and prepare it for payment.">
+    <link rel="icon" type="image/png" href="img/icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css?v=20261006.shopf2">
+</head>
+<body class="shop-page checkout-page" data-nav-section="store">
+    <header class="header">
+        <div class="nav-container">
+            <div class="logo-wrap">
+                <img src="img/icon.png" alt="Dyndel Pino logo">
+                <div class="brand">Dyndel <span>Pino</span></div>
+            </div>
+            <nav class="nav" aria-label="Main navigation">
+                <ul class="nav-list">
+                    <li><a href="index.html" data-nav-section="home">Home</a></li>
+                    <li class="nav-works">
+                        <button class="nav-works-toggle" type="button" data-works-toggle aria-expanded="false" aria-controls="works-menu">Works <span class="nav-caret" aria-hidden="true">&#9662;</span></button>
+                        <ul class="nav-submenu" id="works-menu">
+                            <li><a href="illustration.html" data-works-section="illustration">Illustration</a></li>
+                            <li><a href="portraits.html" data-works-section="portraits">Portraits</a></li>
+                            <li><a href="logos.html" data-works-section="logos">Logos</a></li>
+                        </ul>
+                    </li>
+                    <li><a href="stories.php" data-nav-section="stories">Stories</a></li>
+                    <li><a href="index.html#contact" data-nav-section="contact">Contact</a></li>
+                    <li><a href="store.html" data-nav-section="store">Store</a></li>
+                </ul>
+            </nav>
+            <div class="header-cart-slot">
+                <button class="shop-header-cart" type="button" data-open-cart aria-expanded="false" aria-hidden="true" tabindex="-1">Cart <span class="shop-header-cart-count" data-cart-count hidden>0</span></button>
+            </div>
+            <button class="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false"><span></span><span></span><span></span></button>
+        </div>
+    </header>
+
+    <div class="shop-cart-layer" data-cart-region hidden>
+        <div class="shop-cart-backdrop" data-cart-backdrop aria-hidden="true"></div>
+        <aside class="shop-cart" id="shop-cart-panel" data-cart-panel role="dialog" aria-modal="true" aria-labelledby="shop-cart-title" tabindex="-1">
+            <div class="shop-cart-header">
+                <div><h2 id="shop-cart-title">Cart</h2><p class="shop-cart-dialog-count" data-cart-dialog-count>Empty</p></div>
+                <button class="icon-button shop-cart-close" type="button" data-close-cart aria-label="Close cart">&times;</button>
+            </div>
+            <div class="shop-cart-items" data-cart-items aria-label="Cart items"></div>
+            <div class="shop-cart-footer">
+                <div class="shop-cart-total"><span>Subtotal</span><strong data-cart-total>$0.00</strong></div>
+                <p class="shop-cart-feedback" data-cart-feedback role="status" aria-live="polite"></p>
+                <a class="btn btn-primary shop-cart-checkout" href="checkout.html" data-cart-checkout hidden>CHECKOUT</a>
+                <button class="btn btn-secondary shop-cart-continue" type="button" data-continue-shopping>CONTINUE SHOPPING</button>
+            </div>
+        </aside>
+    </div>
+
+    <main class="page-shell checkout-shell" data-checkout>
+        <header class="checkout-heading">
+            <a class="shop-product-back" href="store.html">Back to Store</a>
+            <p class="eyebrow">Dyndel artist shop</p>
+            <h1>Checkout</h1>
+            <p>Guest checkout. All prices and totals are in USD.</p>
+        </header>
+
+        <div class="checkout-status" data-checkout-status role="status" aria-live="polite">Validating your Cart&hellip;</div>
+        <section class="checkout-empty" data-checkout-empty hidden>
+            <h2>Your Cart is empty.</h2>
+            <p>Add a piece from the Store before starting Checkout.</p>
+            <a class="btn btn-primary" href="store.html">Return to Store</a>
+        </section>
+
+        <form class="checkout-layout" data-checkout-form novalidate hidden>
+            <div class="checkout-fields">
+                <div class="checkout-error-summary" data-checkout-errors role="alert" tabindex="-1" hidden></div>
+                <fieldset class="checkout-section">
+                    <legend>Contact</legend>
+                    <div class="checkout-field">
+                        <label for="checkout-name">Full Name</label>
+                        <input id="checkout-name" name="customerName" type="text" maxlength="160" autocomplete="name" required>
+                    </div>
+                    <div class="checkout-field-grid">
+                        <div class="checkout-field">
+                            <label for="checkout-email">Email</label>
+                            <input id="checkout-email" name="customerEmail" type="email" maxlength="190" autocomplete="email" required>
+                        </div>
+                        <div class="checkout-field">
+                            <label for="checkout-phone">Phone <span>(optional)</span></label>
+                            <input id="checkout-phone" name="customerPhone" type="tel" maxlength="40" autocomplete="tel" pattern="[0-9+().\- ]{5,40}">
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="checkout-section" data-checkout-shipping hidden>
+                    <legend>Shipping Address</legend>
+                    <div class="checkout-field">
+                        <label for="checkout-country">Country</label>
+                        <select id="checkout-country" name="countryCode" autocomplete="country" data-checkout-country>
+                            <option value="">Choose a country</option>
+                        </select>
+                    </div>
+                    <div class="checkout-field">
+                        <label for="checkout-address1">Address Line 1</label>
+                        <input id="checkout-address1" name="addressLine1" type="text" maxlength="255" autocomplete="address-line1">
+                    </div>
+                    <div class="checkout-field">
+                        <label for="checkout-address2">Address Line 2 <span>(optional)</span></label>
+                        <input id="checkout-address2" name="addressLine2" type="text" maxlength="255" autocomplete="address-line2">
+                    </div>
+                    <div class="checkout-field-grid">
+                        <div class="checkout-field"><label for="checkout-city">City</label><input id="checkout-city" name="city" type="text" maxlength="120" autocomplete="address-level2"></div>
+                        <div class="checkout-field"><label for="checkout-region">State / Province / Region <span>(if applicable)</span></label><input id="checkout-region" name="region" type="text" maxlength="120" autocomplete="address-level1"></div>
+                    </div>
+                    <div class="checkout-field checkout-field-postal"><label for="checkout-postal">Postal / ZIP Code</label><input id="checkout-postal" name="postalCode" type="text" maxlength="32" autocomplete="postal-code"></div>
+                </fieldset>
+
+                <fieldset class="checkout-section" data-checkout-delivery hidden>
+                    <legend>Delivery Method</legend>
+                    <div class="checkout-shipping-message" data-checkout-shipping-message></div>
+                    <div class="checkout-methods" data-checkout-methods></div>
+                </fieldset>
+            </div>
+
+            <aside class="checkout-summary" aria-labelledby="checkout-summary-title">
+                <h2 id="checkout-summary-title">Order Summary</h2>
+                <div class="checkout-summary-items" data-checkout-summary-items></div>
+                <dl class="checkout-totals">
+                    <div><dt>Subtotal</dt><dd data-checkout-subtotal>&mdash;</dd></div>
+                    <div data-checkout-shipping-row><dt>Shipping</dt><dd data-checkout-shipping-total>&mdash;</dd></div>
+                    <div class="checkout-total"><dt>Total USD</dt><dd data-checkout-total>&mdash;</dd></div>
+                </dl>
+                <p class="checkout-currency">USD is the authoritative checkout currency.</p>
+                <div class="checkout-policy-hooks" aria-label="Store policy information">
+                    <span>Terms</span><span>Privacy</span><span>Shipping &amp; Delivery</span><span>Returns &amp; Refunds</span><span data-digital-policy hidden>Digital Products</span>
+                    <small>Policy links will be available before payment launches.</small>
+                </div>
+                <button class="btn btn-primary checkout-submit" type="submit" data-checkout-submit disabled>CONTINUE TO PAYMENT</button>
+            </aside>
+        </form>
+
+        <section class="checkout-handoff" data-checkout-handoff tabindex="-1" hidden>
+            <p class="eyebrow">Payment boundary</p>
+            <h2>Order prepared.</h2>
+            <p>Payment integration will be added in the next milestone.</p>
+            <p class="checkout-handoff-detail">This order is pending and unpaid. Your Cart has not been cleared.</p>
+            <a class="btn btn-secondary" href="store.html">Return to Store</a>
+        </section>
+    </main>
+
+    <footer class="footer"><p>&copy; 2026 Dyndel Pino</p></footer>
+    <script src="script.js?v=20261006.shopf2"></script>
+</body>
+</html>

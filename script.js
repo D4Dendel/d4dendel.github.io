@@ -141,7 +141,7 @@ if (nav && document.body.dataset.page !== 'admin') {
     let activeSection = explicitSection;
     if (!activeSection && worksSection) activeSection = 'works';
     if (!activeSection && (file === 'stories.php' || file === 'story.php')) activeSection = 'stories';
-    if (!activeSection && file === 'store.html') activeSection = 'store';
+    if (!activeSection && (file === 'store.html' || file === 'checkout.html')) activeSection = 'store';
     if (!activeSection && (file === 'index.html' || file === '')) activeSection = current.hash === '#contact' ? 'contact' : 'home';
 
     nav.querySelectorAll('[aria-current]').forEach((item) => item.removeAttribute('aria-current'));
@@ -2787,6 +2787,8 @@ const cartFeedback = document.querySelector('[data-cart-feedback]');
 const cartBackdrop = document.querySelector('[data-cart-backdrop]');
 const cartCloseButton = document.querySelector('[data-close-cart]');
 const cartContinueButton = document.querySelector('[data-continue-shopping]');
+const cartCheckoutLink = document.querySelector('[data-cart-checkout]');
+const checkoutPage = document.querySelector('[data-checkout]');
 const CART_KEY = 'dyndelShopCart';
 const requestedProductSlug = new URLSearchParams(window.location.search).get('product')?.trim() || '';
 let shopProducts = [];
@@ -2807,7 +2809,10 @@ let cart = normalizeCartData(storedCart);
 let shopCatalogHydrated = false;
 let shopCatalogRequest = null;
 
-const saveCart = () => saveData(CART_KEY, cart);
+const saveCart = () => {
+  saveData(CART_KEY, cart);
+  window.dispatchEvent(new CustomEvent('dyndel:cart-change', { detail: { cart: normalizeCartData(cart) } }));
+};
 const money = (value) => `$${Number(value).toFixed(2)}`;
 const shopPrice = (value) => `$${String(value)}`;
 
@@ -2835,6 +2840,7 @@ const renderCart = () => {
   if (cartButton) cartButton.setAttribute('aria-label', count ? `Cart, ${count} item${count === 1 ? '' : 's'}` : 'Cart, empty');
   if (cartDialogCount) cartDialogCount.textContent = count ? `${count} item${count === 1 ? '' : 's'}` : 'Empty';
   if (cartTotalTarget) cartTotalTarget.textContent = money(total);
+  if (cartCheckoutLink) cartCheckoutLink.hidden = detailedCart.length === 0;
   if (cartItemsTarget) {
     cartItemsTarget.replaceChildren();
     if (!detailedCart.length) {
@@ -3408,7 +3414,7 @@ const restoreCartControlFocus = (...selectors) => {
   });
 };
 
-if (shopProductsTarget || shopProductDetailTarget) {
+if (shopProductsTarget || shopProductDetailTarget || checkoutPage) {
   renderCart();
   const message = document.createElement('p');
   if (requestedProductSlug && shopProductDetailTarget) {
@@ -3419,7 +3425,7 @@ if (shopProductsTarget || shopProductDetailTarget) {
     }).catch((error) => {
       renderShopProductState(error.message === 'Product not found.' ? 'not-found' : 'error');
     });
-  } else {
+  } else if (shopProductsTarget) {
     updateShopProductMetadata();
     loadShopCatalog().then(() => {
       renderShopProducts();
@@ -3428,6 +3434,10 @@ if (shopProductsTarget || shopProductDetailTarget) {
       message.className = 'shop-form-message';
       message.textContent = error.message;
       shopProductsTarget.replaceChildren(message);
+    });
+  } else {
+    loadShopCatalog().then(renderCart).catch(() => {
+      setCartFeedback('The cart could not refresh. Please try again.');
     });
   }
   document.addEventListener('click', (event) => {
@@ -3540,6 +3550,294 @@ if (shopProductsTarget || shopProductDetailTarget) {
       first.focus();
     }
   });
+}
+
+const checkoutForm = document.querySelector('[data-checkout-form]');
+if (checkoutPage && checkoutForm) {
+  const checkoutStatus = document.querySelector('[data-checkout-status]');
+  const checkoutEmpty = document.querySelector('[data-checkout-empty]');
+  const checkoutErrors = document.querySelector('[data-checkout-errors]');
+  const shippingSection = document.querySelector('[data-checkout-shipping]');
+  const deliverySection = document.querySelector('[data-checkout-delivery]');
+  const countryField = document.querySelector('[data-checkout-country]');
+  const methodsTarget = document.querySelector('[data-checkout-methods]');
+  const shippingMessage = document.querySelector('[data-checkout-shipping-message]');
+  const summaryItems = document.querySelector('[data-checkout-summary-items]');
+  const subtotalTarget = document.querySelector('[data-checkout-subtotal]');
+  const shippingTotalTarget = document.querySelector('[data-checkout-shipping-total]');
+  const shippingRow = document.querySelector('[data-checkout-shipping-row]');
+  const totalTarget = document.querySelector('[data-checkout-total]');
+  const submitButton = document.querySelector('[data-checkout-submit]');
+  const handoff = document.querySelector('[data-checkout-handoff]');
+  const digitalPolicy = document.querySelector('[data-digital-policy]');
+  const shippingRequiredFields = [...checkoutForm.querySelectorAll('[name="countryCode"], [name="addressLine1"], [name="city"], [name="postalCode"]')];
+  let checkoutQuote = null;
+  let selectedShippingMethod = null;
+  let quoteRequestSequence = 0;
+  let quoteController = null;
+  let checkoutSubmitting = false;
+  let reviewedQuoteFingerprint = '';
+
+  const checkoutCountryCodes = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW`.split(' ');
+  const regionNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
+  checkoutCountryCodes
+    .map((code) => ({ code, name: regionNames?.of(code) || code }))
+    .sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    .forEach(({ code, name }) => {
+      const option = document.createElement('option');
+      option.value = code;
+      option.textContent = name;
+      countryField.append(option);
+    });
+
+  const checkoutCartPayload = () => normalizeCartData(cart).map(({ id, quantity }) => ({ id, quantity }));
+  const quoteFingerprint = (quote) => JSON.stringify({
+    items: quote.items.map(({ productId, quantity, unitPrice, lineTotal, productType }) => ({ productId, quantity, unitPrice, lineTotal, productType })),
+    subtotal: quote.subtotal,
+    shippingRequired: quote.shippingRequired,
+    countryCode: quote.shipping.countryCode,
+    shippingMethod: quote.shipping.selectedMethod?.id || null,
+    shippingAmount: quote.shipping.amount,
+    total: quote.total,
+  });
+  const checkoutMoney = (value) => value === null || value === undefined ? '—' : `$${value}`;
+  const estimateLabel = (estimate) => {
+    if (!estimate) return '';
+    const unit = estimate.unit === 'calendar_days' ? 'calendar days' : 'business days';
+    return `Estimated ${estimate.minimum}–${estimate.maximum} ${unit}`;
+  };
+  const checkoutAttemptKey = 'dyndelCheckoutAttemptToken';
+  const clearCheckoutAttempt = () => sessionStorage.removeItem(checkoutAttemptKey);
+  const checkoutAttemptToken = () => {
+    const cartSignature = JSON.stringify(checkoutCartPayload());
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(checkoutAttemptKey) || 'null');
+      if (stored?.token && stored.cart === cartSignature) return stored.token;
+    } catch (error) {}
+    const token = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    sessionStorage.setItem(checkoutAttemptKey, JSON.stringify({ token, cart: cartSignature }));
+    return token;
+  };
+
+  const setCheckoutStatus = (message, kind = '') => {
+    checkoutStatus.textContent = message;
+    checkoutStatus.dataset.state = kind;
+  };
+  const showCheckoutError = (message, focus = false) => {
+    checkoutErrors.textContent = message;
+    checkoutErrors.hidden = false;
+    if (focus) checkoutErrors.focus();
+  };
+  const clearCheckoutError = () => {
+    checkoutErrors.textContent = '';
+    checkoutErrors.hidden = true;
+  };
+  const updateCheckoutAction = () => {
+    const shippingReady = checkoutQuote && (!checkoutQuote.shippingRequired
+      || (checkoutQuote.shipping.destinationSupported && checkoutQuote.shipping.selectedMethod && checkoutQuote.total !== null));
+    submitButton.disabled = checkoutSubmitting || !checkoutQuote || !shippingReady;
+  };
+  const setShippingRequirements = (required) => {
+    shippingSection.hidden = !required;
+    deliverySection.hidden = !required;
+    shippingRequiredFields.forEach((field) => { field.required = required; });
+  };
+
+  const renderCheckoutQuote = (quote) => {
+    checkoutQuote = quote;
+    reviewedQuoteFingerprint = quoteFingerprint(quote);
+    checkoutForm.hidden = false;
+    checkoutEmpty.hidden = true;
+    setShippingRequirements(quote.shippingRequired);
+    digitalPolicy.hidden = !quote.items.some((item) => item.productType === 'digital');
+    summaryItems.replaceChildren();
+    quote.items.forEach((item) => {
+      const row = document.createElement('article');
+      row.className = 'checkout-summary-item';
+      const image = document.createElement('img');
+      image.src = item.image || 'img/icon.png';
+      image.alt = item.imageAlt?.trim() || `${item.name} artwork`;
+      image.addEventListener('error', () => { image.src = 'img/icon.png'; }, { once: true });
+      const copy = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = item.name;
+      const quantity = document.createElement('span');
+      quantity.textContent = `Quantity ${item.quantity} × ${checkoutMoney(item.unitPrice)}`;
+      copy.append(name, quantity);
+      const line = document.createElement('strong');
+      line.textContent = checkoutMoney(item.lineTotal);
+      row.append(image, copy, line);
+      summaryItems.append(row);
+    });
+    subtotalTarget.textContent = checkoutMoney(quote.subtotal);
+    shippingRow.hidden = !quote.shippingRequired;
+    shippingTotalTarget.textContent = checkoutMoney(quote.shipping.amount);
+    totalTarget.textContent = checkoutMoney(quote.total);
+
+    methodsTarget.replaceChildren();
+    if (quote.shippingRequired) {
+      if (!quote.shipping.countryCode) {
+        shippingMessage.textContent = 'Choose a destination to see available delivery methods.';
+      } else if (!quote.shipping.destinationSupported) {
+        shippingMessage.textContent = 'Shipping is not available for this destination yet.';
+      } else {
+        shippingMessage.textContent = 'Shipping prices and estimates are provided by the Store.';
+        quote.shipping.methods.forEach((method) => {
+          const label = document.createElement('label');
+          label.className = 'checkout-method';
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = 'shippingMethodId';
+          input.value = String(method.id);
+          input.checked = quote.shipping.selectedMethod?.id === method.id;
+          const copy = document.createElement('span');
+          const heading = document.createElement('span');
+          heading.className = 'checkout-method-heading';
+          const methodName = document.createElement('strong');
+          methodName.textContent = method.name;
+          const price = document.createElement('strong');
+          price.textContent = checkoutMoney(method.price);
+          heading.append(methodName, price);
+          const estimate = document.createElement('small');
+          estimate.textContent = estimateLabel(method.estimatedDelivery);
+          copy.append(heading);
+          if (estimate.textContent) copy.append(estimate);
+          label.append(input, copy);
+          methodsTarget.append(label);
+        });
+      }
+    }
+    updateCheckoutAction();
+  };
+
+  const fetchCheckoutQuote = async () => {
+    const items = checkoutCartPayload();
+    if (!items.length) throw new Error('Your Cart is empty.');
+    const formData = new FormData();
+    formData.set('items', JSON.stringify(items));
+    if (countryField.value) formData.set('countryCode', countryField.value);
+    if (selectedShippingMethod) formData.set('shippingMethodId', String(selectedShippingMethod));
+    const data = await cmsRequest('checkout-quote', { method: 'POST', body: formData, signal: quoteController?.signal });
+    return data.quote;
+  };
+
+  const refreshCheckoutQuote = async ({ announce = true } = {}) => {
+    const items = checkoutCartPayload();
+    if (!items.length) {
+      quoteController?.abort();
+      checkoutQuote = null;
+      checkoutForm.hidden = true;
+      checkoutEmpty.hidden = false;
+      setCheckoutStatus('Your Cart is empty.', 'empty');
+      return null;
+    }
+    const requestId = ++quoteRequestSequence;
+    quoteController?.abort();
+    quoteController = new AbortController();
+    if (announce) setCheckoutStatus('Updating your order review…', 'loading');
+    submitButton.disabled = true;
+    try {
+      const quote = await fetchCheckoutQuote();
+      if (requestId !== quoteRequestSequence) return null;
+      renderCheckoutQuote(quote);
+      clearCheckoutError();
+      setCheckoutStatus('Order review is up to date.', 'ready');
+      return quote;
+    } catch (error) {
+      if (error.name === 'AbortError' || requestId !== quoteRequestSequence) return null;
+      checkoutQuote = null;
+      checkoutForm.hidden = true;
+      checkoutEmpty.hidden = false;
+      checkoutEmpty.querySelector('h2').textContent = error.message === 'Your Cart is empty.' ? 'Your Cart is empty.' : 'Checkout needs your attention.';
+      checkoutEmpty.querySelector('p').textContent = error.message;
+      setCheckoutStatus(error.message, 'error');
+      return null;
+    }
+  };
+
+  countryField.addEventListener('change', () => {
+    selectedShippingMethod = null;
+    clearCheckoutAttempt();
+    refreshCheckoutQuote();
+  });
+  methodsTarget.addEventListener('change', (event) => {
+    if (!(event.target instanceof HTMLInputElement) || event.target.name !== 'shippingMethodId') return;
+    selectedShippingMethod = Number(event.target.value);
+    clearCheckoutAttempt();
+    refreshCheckoutQuote();
+  });
+  checkoutForm.addEventListener('input', () => {
+    if (!checkoutSubmitting) clearCheckoutAttempt();
+  });
+
+  const syncCheckoutCart = () => {
+    clearCheckoutAttempt();
+    selectedShippingMethod = null;
+    refreshCheckoutQuote().then((quote) => {
+      if (quote) setCheckoutStatus('Your Cart changed. Review the updated order before continuing.', 'review');
+    });
+  };
+  window.addEventListener('dyndel:cart-change', syncCheckoutCart);
+  window.addEventListener('storage', (event) => {
+    if (event.key !== CART_KEY) return;
+    cart = normalizeCartData(getStoredData(CART_KEY, []));
+    renderCart();
+    window.dispatchEvent(new CustomEvent('dyndel:cart-change', { detail: { cart } }));
+  });
+
+  checkoutForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (checkoutSubmitting || !checkoutQuote) return;
+    clearCheckoutError();
+    if (!checkoutForm.checkValidity()) {
+      const invalid = checkoutForm.querySelector(':invalid');
+      showCheckoutError('Complete the highlighted required fields before continuing.', true);
+      invalid?.focus();
+      return;
+    }
+    checkoutSubmitting = true;
+    updateCheckoutAction();
+    setCheckoutStatus('Revalidating current prices and availability…', 'loading');
+    try {
+      const reviewed = reviewedQuoteFingerprint;
+      quoteController?.abort();
+      quoteController = new AbortController();
+      const freshQuote = await fetchCheckoutQuote();
+      const freshFingerprint = quoteFingerprint(freshQuote);
+      if (freshFingerprint !== reviewed) {
+        renderCheckoutQuote(freshQuote);
+        clearCheckoutAttempt();
+        showCheckoutError('Your Cart or total changed. Review the updated order, then continue again.', true);
+        setCheckoutStatus('Order review updated.', 'review');
+        return;
+      }
+
+      const fields = new FormData(checkoutForm);
+      const request = new FormData();
+      request.set('attemptToken', checkoutAttemptToken());
+      request.set('items', JSON.stringify(checkoutCartPayload()));
+      ['customerName', 'customerEmail', 'customerPhone'].forEach((name) => request.set(name, fields.get(name)?.toString().trim() || ''));
+      if (freshQuote.shippingRequired) {
+        ['countryCode', 'addressLine1', 'addressLine2', 'city', 'region', 'postalCode'].forEach((name) => request.set(name, fields.get(name)?.toString().trim() || ''));
+        request.set('shippingMethodId', String(selectedShippingMethod));
+      }
+      setCheckoutStatus('Preparing your pending order…', 'loading');
+      const result = await cmsRequest('checkout-order', { method: 'POST', body: request });
+      checkoutForm.hidden = true;
+      handoff.hidden = false;
+      handoff.dataset.orderId = String(result.order.id);
+      setCheckoutStatus(`Order ${result.order.id} is prepared and remains unpaid.`, 'ready');
+      handoff.focus();
+    } catch (error) {
+      showCheckoutError(error.message || 'The order could not be prepared. Please try again.', true);
+      setCheckoutStatus('The order was not prepared.', 'error');
+    } finally {
+      checkoutSubmitting = false;
+      updateCheckoutAction();
+    }
+  });
+
+  refreshCheckoutQuote({ announce: false });
 }
 
 renderProjectList();

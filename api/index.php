@@ -265,6 +265,11 @@ if ($action === 'checkout-quote') {
     )]);
 }
 
+if ($action === 'checkout-order') {
+    require_post();
+    json_response(['order' => shop_checkout_create_order(db(), $_POST)], 201);
+}
+
 if ($action === 'order') {
     // Legacy compatibility only. Shop F2 must use a separate payment-aware
     // order-creation flow; this endpoint still decrements stock immediately.
