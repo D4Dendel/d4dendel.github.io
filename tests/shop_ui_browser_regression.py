@@ -189,8 +189,12 @@ class CdpClient:
     def wait_for(self, expression, timeout=10):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.evaluate(expression):
-                return
+            try:
+                if self.evaluate(expression):
+                    return
+            except RuntimeError as error:
+                if "Inspected target navigated or closed" not in str(error):
+                    raise
             time.sleep(0.1)
         raise AssertionError("Browser condition timed out: " + expression)
 
@@ -240,11 +244,11 @@ def js_string(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def capture_screenshot(cdp, filename):
+def capture_screenshot(cdp, filename, full_page=True):
     if not ARTIFACT_DIR:
         return
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
-    result = cdp.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True})
+    result = cdp.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": full_page})
     with open(os.path.join(ARTIFACT_DIR, filename), "wb") as image:
         image.write(base64.b64decode(result["data"]))
 
@@ -322,7 +326,156 @@ try:
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
     })
-    cdp.navigate(BASE + "graphic-design.html")
+    status, navigation_content = api_request("content")
+    expect(status == 200 and navigation_content.get("entries"), "No published Story was available for navigation regression")
+    navigation_story = navigation_content["entries"][0]
+    desktop_routes = [
+        ("index.html", "home", ""),
+        ("illustration.html", "works", "illustration"),
+        ("portraits.html", "works", "portraits"),
+        ("logos.html", "works", "logos"),
+        ("stories.php", "stories", ""),
+        ("story.php?slug=" + urllib.parse.quote(navigation_story["slug"]), "stories", ""),
+    ]
+    for route, expected_section, expected_child in desktop_routes:
+        expected_path = urllib.parse.urlparse(BASE + route).path
+        cdp.navigate(BASE + route, f"document.readyState !== 'loading' && location.pathname === {js_string(expected_path)} && document.querySelectorAll('.nav-list > li').length === 5")
+        navigation_state = cdp.evaluate("""
+            (() => {
+                const cart=document.querySelector('[data-open-cart]');
+                const header=document.querySelector('.header');
+                const container=document.querySelector('.nav-container');
+                const nav=document.querySelector('.nav');
+                const navList=document.querySelector('.nav-list');
+                const menuToggle=document.querySelector('.menu-toggle');
+                const topItems=[...document.querySelectorAll('.nav-list > li')].map(item => item.querySelector(':scope > a, :scope > button'));
+                const itemRects=topItems.map(item => item.getBoundingClientRect());
+                const navRect=nav.getBoundingClientRect();
+                const containerRect=container.getBoundingClientRect();
+                return {
+                    labels:topItems.map(item => item.textContent.replace('▾','').trim()),
+                    worksChildren:[...document.querySelectorAll('.nav-submenu > li > a')].map(item => item.textContent.trim()),
+                    graphicDesignLinks:document.querySelectorAll('.nav a[href*="graphic-design"]').length,
+                    currentTop:topItems.filter(item => item.hasAttribute('aria-current')).map(item => item.dataset.navSection || 'works'),
+                    currentChild:document.querySelector('[data-works-section][aria-current]')?.dataset.worksSection || '',
+                    worksExpanded:document.querySelector('[data-works-toggle]').getAttribute('aria-expanded'),
+                    cartVisibility:getComputedStyle(cart).visibility,
+                    cartTabIndex:cart.tabIndex,
+                    navDisplay:getComputedStyle(nav).display,
+                    navPosition:getComputedStyle(nav).position,
+                    navDirection:getComputedStyle(navList).flexDirection,
+                    menuDisplay:getComputedStyle(menuToggle).display,
+                    itemsHorizontal:itemRects.every(rect => Math.abs(rect.top-itemRects[0].top) < 1) && itemRects.slice(1).every((rect,index) => rect.left >= itemRects[index].right),
+                    navContained:navRect.left >= containerRect.left && navRect.right <= containerRect.right && header.getBoundingClientRect().width <= innerWidth,
+                    positions:topItems.map(item => Math.round(item.getBoundingClientRect().left * 10) / 10),
+                    overflow:document.documentElement.scrollWidth > innerWidth
+                };
+            })()
+        """)
+        expect(navigation_state["labels"] == ["Home", "Works", "Stories", "Contact", "Store"], f"Public navigation structure was incorrect on {route}")
+        expect(navigation_state["worksChildren"] == ["Illustration", "Portraits", "Logos"] and navigation_state["graphicDesignLinks"] == 0, f"Works children were exposed incorrectly on {route}: " + json.dumps(navigation_state))
+        expect(navigation_state["currentTop"] == [expected_section] and navigation_state["currentChild"] == expected_child and navigation_state["worksExpanded"] == "false", f"Active navigation state was incorrect on {route}: " + json.dumps(navigation_state))
+        expect(navigation_state["navDisplay"] != "none" and navigation_state["navPosition"] == "static" and navigation_state["navDirection"] == "row" and navigation_state["menuDisplay"] == "none" and navigation_state["itemsHorizontal"] and navigation_state["navContained"], f"Desktop navigation layout was not horizontal and contained on {route}: " + json.dumps(navigation_state))
+        expect(navigation_state["cartVisibility"] == "hidden" and navigation_state["cartTabIndex"] == -1 and not navigation_state["overflow"], f"Cart or horizontal layout regressed outside Store on {route}")
+        if expected_child:
+            capture_screenshot(cdp, f"navigation-desktop-{expected_child}.png", full_page=False)
+        checks += 5
+
+    cdp.call("Page.bringToFront")
+    dropdown_state = cdp.evaluate("""
+        (async () => {
+            const works=document.querySelector('.nav-works');
+            const toggle=document.querySelector('[data-works-toggle]');
+            const firstChild=works.querySelector('.nav-submenu a');
+            const home=document.querySelector('[data-nav-section="home"]');
+            document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+            toggle.focus({preventScroll:true});
+            toggle.click();
+            const clickClass=works.classList.contains('is-open');
+            const clickAria=toggle.getAttribute('aria-expanded');
+            const clickVisibility=getComputedStyle(firstChild).visibility;
+            const clickSubmenuVisibility=getComputedStyle(works.querySelector('.nav-submenu')).visibility;
+            const clickNavVisibility=getComputedStyle(document.querySelector('.nav')).visibility;
+            const clickOpen=clickClass && clickAria === 'true' && clickVisibility === 'visible';
+            document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+            const escapeClosed=!works.classList.contains('is-open') && toggle.getAttribute('aria-expanded') === 'false' && document.activeElement === toggle;
+            toggle.focus({preventScroll:true});
+            toggle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+            const arrowClass=works.classList.contains('is-open');
+            const arrowActive=document.activeElement?.outerHTML || '';
+            const arrowFocused=arrowClass && document.activeElement === firstChild;
+            home.focus({preventScroll:true});
+            const focusOutsideClosed=!works.classList.contains('is-open');
+            works.dispatchEvent(new PointerEvent('pointerenter'));
+            const hoverOpen=works.classList.contains('is-open') && toggle.getAttribute('aria-expanded') === 'true';
+            works.dispatchEvent(new PointerEvent('pointerleave'));
+            await new Promise(resolve => setTimeout(resolve,160));
+            const hoverClosed=!works.classList.contains('is-open');
+            toggle.click();
+            document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+            const pointerOutsideClosed=!works.classList.contains('is-open');
+            return {clickOpen,clickClass,clickAria,clickVisibility,clickSubmenuVisibility,clickNavVisibility,innerWidth,desktopMedia:matchMedia('(min-width:761px)').matches,escapeClosed,arrowFocused,arrowClass,arrowActive,focusOutsideClosed,hoverOpen,hoverClosed,pointerOutsideClosed,links:[...works.querySelectorAll('a')].map(link=>link.getAttribute('href'))};
+        })()
+    """, await_promise=True)
+    expect(all(dropdown_state[key] for key in ["clickOpen", "escapeClosed", "arrowFocused", "focusOutsideClosed", "hoverOpen", "hoverClosed", "pointerOutsideClosed"]), "Desktop Works pointer/keyboard behavior failed: " + json.dumps(dropdown_state))
+    expect(dropdown_state["links"] == ["illustration.html", "portraits.html", "logos.html"], "Works child links stopped being normal destinations")
+    cdp.evaluate("document.activeElement?.blur(); document.querySelector('.nav-works').dispatchEvent(new PointerEvent('pointerenter'))")
+    capture_screenshot(cdp, "navigation-desktop-works.png", full_page=False)
+    cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+
+    header_state = cdp.evaluate("""
+        (() => {
+            document.activeElement?.blur();
+            scrollTo(0,0);
+            const header=document.querySelector('.header');
+            return {position:getComputedStyle(header).position,normalHeight:header.getBoundingClientRect().height,normalLogo:document.querySelector('.logo-wrap img').getBoundingClientRect().width};
+        })()
+    """)
+    cdp.evaluate("scrollTo(0,420)")
+    cdp.wait_for(f"document.querySelector('.header').classList.contains('is-compact') && document.querySelector('.header').getBoundingClientRect().height < {header_state['normalHeight'] - 1}")
+    compact_state = cdp.evaluate("({height:document.querySelector('.header').getBoundingClientRect().height,logo:document.querySelector('.logo-wrap img').getBoundingClientRect().width})")
+    expect(header_state["position"] == "sticky" and compact_state["height"] < header_state["normalHeight"] and compact_state["logo"] < header_state["normalLogo"], "Sticky compact-on-scroll header did not reduce restrainedly: " + json.dumps({"normal": header_state, "compact": compact_state}))
+    capture_screenshot(cdp, "navigation-desktop-compact.png", full_page=False)
+    cdp.evaluate("scrollTo(0,0)")
+    cdp.wait_for(f"!document.querySelector('.header').classList.contains('is-compact') && Math.abs(document.querySelector('.header').getBoundingClientRect().height - {header_state['normalHeight']}) < 1")
+    expect(abs(cdp.evaluate("document.querySelector('.header').getBoundingClientRect().height") - header_state["normalHeight"]) < 1, "Header did not return to its normal top-of-page height")
+    cdp.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
+    expect(cdp.evaluate("getComputedStyle(document.querySelector('.nav-container')).transitionDuration") == "0s", "Reduced motion did not disable navigation transitions")
+    cdp.call("Emulation.setEmulatedMedia", {"features": []})
+
+    theme_signatures = cdp.evaluate("""
+        (() => {
+            const root=document.documentElement;
+            const activeElement=document.querySelector('.nav-list > li > [aria-current]');
+            const originalTransition=activeElement.style.transition;
+            activeElement.style.transition='none';
+            const names=['--blue-deep','--panel-strong','--text'];
+            const original=Object.fromEntries(names.map(name=>[name,root.style.getPropertyValue(name)]));
+            const palettes=[
+                ['default','#c86f52','#fff8f3','#3d2925'],
+                ['pastel','#7968d8','#fbf8ff','#34304f'],
+                ['midnight','#8ca8ff','#171a2b','#f3f5ff']
+            ];
+            const signatures=palettes.map(([name,accent,surface,text])=>{
+                root.style.setProperty('--blue-deep',accent);
+                root.style.setProperty('--panel-strong',surface);
+                root.style.setProperty('--text',text);
+                return {name,submenu:getComputedStyle(document.querySelector('.nav-submenu')).backgroundColor,active:getComputedStyle(activeElement).color,focus:getComputedStyle(document.querySelector('[data-works-toggle]')).outlineColor};
+            });
+            names.forEach(name=>original[name] ? root.style.setProperty(name,original[name]) : root.style.removeProperty(name));
+            activeElement.style.transition=originalTransition;
+            return signatures;
+        })()
+    """)
+    expect(len({item["submenu"] for item in theme_signatures}) == 3 and len({item["active"] for item in theme_signatures}) == 3, "Default, Pastel, and Midnight token palettes did not restyle navigation: " + json.dumps(theme_signatures))
+    checks += 7
+
+    product_hook_url = BASE + "store.html?product=" + urllib.parse.quote(initial_public_products[0]["slug"])
+    cdp.evaluate(f"location.assign({js_string(product_hook_url)})")
+    try:
+        cdp.wait_for("location.pathname.endsWith('/store.html') && location.search.startsWith('?product=') && Boolean(document.querySelector('[data-shop-products]'))", 15)
+    except AssertionError:
+        raise AssertionError("Could not enter Store after navigation regression: " + json.dumps(cdp.evaluate("({href:location.href,ready:document.readyState,title:document.title,hasShop:Boolean(document.querySelector('[data-shop-products]')),body:document.body?.className || ''})")))
     cdp.evaluate("localStorage.removeItem('dyndelShopCart'); location.reload()")
     cdp.wait_for("document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3", 15)
     cdp.wait_for("[...document.querySelectorAll('.shop-product-image.is-primary')].every(image => image.complete && image.naturalWidth > 0)", 15)
@@ -352,6 +505,12 @@ try:
             const linkRect=link.getBoundingClientRect();
             const cardStyle=getComputedStyle(card);
             const bannerRect=banner.getBoundingClientRect();
+            const topItems=[...document.querySelectorAll('.nav-list > li')].map(item => item.querySelector(':scope > a, :scope > button'));
+            const cart=document.querySelector('[data-open-cart]');
+            const navPositions=topItems.map(item => Math.round(item.getBoundingClientRect().left * 10) / 10);
+            document.body.classList.remove('is-store-experience');
+            const hiddenCartNavPositions=topItems.map(item => Math.round(item.getBoundingClientRect().left * 10) / 10);
+            document.body.classList.add('is-store-experience');
             return {
                 bannerHeight:bannerRect.height,
                 bannerLeft:bannerRect.left,
@@ -366,8 +525,13 @@ try:
                 cardSurface:cardStyle.backgroundColor,
                 linkCoversCard:Math.abs(linkRect.width-cardRect.width) <= 2 && Math.abs(linkRect.height-cardRect.height) <= 2,
                 cartInHeader:Boolean(document.querySelector('.header [data-open-cart]')),
-                cartWidth:document.querySelector('[data-open-cart]').getBoundingClientRect().width,
+                cartWidth:cart.getBoundingClientRect().width,
+                cartVisibility:getComputedStyle(cart).visibility,
+                cartTabIndex:cart.tabIndex,
                 emptyCountHidden:document.querySelector('[data-cart-count]').hidden,
+                currentTop:topItems.filter(item => item.hasAttribute('aria-current')).map(item => item.dataset.navSection || 'works'),
+                navPositions,
+                hiddenCartNavPositions,
                 overflow:document.documentElement.scrollWidth > innerWidth
             };
         })()
@@ -375,16 +539,17 @@ try:
     expect(storefront_shell["bannerHeight"] <= 300 and storefront_shell["bannerImages"] == 3 and abs(storefront_shell["bannerLeft"]) < 1 and abs(storefront_shell["bannerRight"] - storefront_shell["viewportWidth"]) < 1 and abs(storefront_shell["bannerHeaderGap"]) < 1, "Desktop Shop banner was not full-bleed, flush to the header, short, and artwork-led: " + json.dumps(storefront_shell))
     expect(storefront_shell["headings"] == ["Art Prints"] and storefront_shell["columns"] == 3 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
     expect(0 <= storefront_shell["titlePriceGap"] <= 8 and storefront_shell["cardRadius"] >= 10 and storefront_shell["cardSurface"] != "rgba(0, 0, 0, 0)" and storefront_shell["linkCoversCard"], "Desktop product cards were not compact, rounded, surfaced, and fully linked")
-    expect(storefront_shell["cartInHeader"] and storefront_shell["cartWidth"] < 100 and storefront_shell["emptyCountHidden"], "Desktop cart access was not compactly integrated with the header")
+    expect(storefront_shell["cartInHeader"] and storefront_shell["cartWidth"] == 82 and storefront_shell["cartVisibility"] == "visible" and storefront_shell["cartTabIndex"] == 0 and storefront_shell["emptyCountHidden"] and storefront_shell["currentTop"] == ["store"], "Desktop Store/Cart navigation state was incorrect")
+    expect(storefront_shell["navPositions"] == storefront_shell["hiddenCartNavPositions"], "Reserved desktop Cart slot shifted the primary navigation when Cart visibility changed")
     status, theme_response = api_request("theme")
     applied_accent = cdp.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim().toLowerCase()")
     expect(status == 200 and applied_accent == theme_response["theme"]["accentColor"].lower(), "Public Shop did not apply the published theme")
-    checks += 8
+    checks += 9
 
     first_product = initial_public_products[0]
     first_price = float(first_product["currentPrice"])
-    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:2}}])); location.reload()")
-    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '2'")
+    cdp.evaluate(f"localStorage.setItem('dyndelShopCart', JSON.stringify([{{id:{first_product['id']},quantity:10}}])); location.reload()")
+    cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '10'")
     cdp.evaluate("document.querySelector('[data-open-cart]').click()")
     cdp.wait_for("!document.querySelector('[data-cart-region]').hidden && !document.querySelector('[data-cart-panel]').hidden")
     cart_state = cdp.evaluate("""
@@ -392,22 +557,128 @@ try:
             const panel=document.querySelector('[data-cart-panel]').getBoundingClientRect();
             const catalog=document.querySelector('.shop-catalog').getBoundingClientRect();
             const count=document.querySelector('[data-cart-count]');
-            return {count:count.textContent, countHidden:count.hidden, total:document.querySelector('[data-cart-total]').textContent, item:document.querySelector('.shop-cart-item span').textContent, expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'), panelBeforeCatalog:panel.bottom <= catalog.top};
+            const topItems=[...document.querySelectorAll('.nav-list > li')].map(item => item.querySelector(':scope > a, :scope > button'));
+            return {count:count.textContent, countHidden:count.hidden, total:document.querySelector('[data-cart-total]').textContent, item:document.querySelector('.shop-cart-item span').textContent, expanded:document.querySelector('[data-open-cart]').getAttribute('aria-expanded'), panelBeforeCatalog:panel.bottom <= catalog.top,navPositions:topItems.map(item => Math.round(item.getBoundingClientRect().left * 10) / 10)};
         })()
     """)
-    expect(cart_state["total"] == f"${first_price * 2:.2f}" and "× 2" in cart_state["item"] and cart_state["count"] == "2" and not cart_state["countHidden"], "Desktop cart quantity, count, or total changed")
+    expect(cart_state["total"] == f"${first_price * 10:.2f}" and "× 10" in cart_state["item"] and cart_state["count"] == "10" and not cart_state["countHidden"], "Desktop cart quantity, count, or total changed")
     expect(cart_state["expanded"] == "true" and cart_state["panelBeforeCatalog"], "Opened cart did not remain in document flow above the product cards")
+    expect(cart_state["navPositions"] == storefront_shell["navPositions"], "A two-digit Cart count shifted the primary navigation")
     cdp.evaluate("document.querySelector('[data-remove-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-count]').textContent === '0'")
     expect(cdp.evaluate("document.querySelector('[data-cart-total]').textContent === '$0.00' && document.querySelector('[data-cart-count]').hidden") is True, "Desktop cart removal did not reset the total and hide the empty count")
     cdp.evaluate("document.querySelector('[data-close-cart]').click()")
     cdp.wait_for("document.querySelector('[data-cart-region]').hidden")
-    checks += 3
+    checks += 4
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
     })
-    cdp.navigate(BASE + "graphic-design.html", "document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3")
+    mobile_home_url = BASE + "index.html?nav-mobile=" + token
+    cdp.navigate(mobile_home_url, f"document.readyState !== 'loading' && location.search === '?nav-mobile={token}' && Boolean(document.querySelector('[data-nav-section=\"home\"][aria-current]'))")
+    mobile_home = cdp.evaluate("""
+        (() => {
+            const cart=document.querySelector('[data-open-cart]');
+            const slot=document.querySelector('.header-cart-slot');
+            return {cartDisplay:getComputedStyle(slot).display,cartVisibility:getComputedStyle(cart).visibility,cartTabIndex:cart.tabIndex,cartHidden:cart.getAttribute('aria-hidden'),overflow:document.documentElement.scrollWidth > innerWidth};
+        })()
+    """)
+    expect(mobile_home == {"cartDisplay": "none", "cartVisibility": "hidden", "cartTabIndex": -1, "cartHidden": "true", "overflow": False}, "Mobile Cart occupied visible or keyboard space outside Store")
+    cdp.evaluate("document.querySelector('.menu-toggle').click(); document.querySelector('[data-works-toggle]').click()")
+    cdp.evaluate("new Promise(resolve=>setTimeout(resolve,250))", await_promise=True)
+    mobile_works = cdp.evaluate("""
+        (() => {
+            const toggle=document.querySelector('[data-works-toggle]');
+            const nav=document.querySelector('.nav');
+            const submenu=document.querySelector('.nav-submenu');
+            const child=submenu.querySelector('a');
+            const store=document.querySelector('[data-nav-section="store"]');
+            const storeRect=store.getBoundingClientRect();
+            const navRect=nav.getBoundingClientRect();
+            return {navOpen:nav.classList.contains('open'),navVisibility:getComputedStyle(nav).visibility,navOpacity:Number(getComputedStyle(nav).opacity),expanded:toggle.getAttribute('aria-expanded'),submenuDisplay:getComputedStyle(submenu).display,submenuPosition:getComputedStyle(submenu).position,touchHeight:child.getBoundingClientRect().height,storeDisplay:getComputedStyle(store).display,storeText:store.textContent.trim(),storeInside:storeRect.top >= navRect.top && storeRect.bottom <= navRect.bottom,storeInViewport:storeRect.bottom <= innerHeight,overflow:submenu.scrollWidth > submenu.clientWidth};
+        })()
+    """)
+    expect(mobile_works["navOpen"] and mobile_works["navVisibility"] == "visible" and mobile_works["navOpacity"] == 1 and mobile_works["expanded"] == "true" and mobile_works["submenuDisplay"] == "grid" and mobile_works["submenuPosition"] == "static" and mobile_works["touchHeight"] >= 40 and mobile_works["storeDisplay"] == "flex" and mobile_works["storeText"] == "Store" and mobile_works["storeInside"] and mobile_works["storeInViewport"] and not mobile_works["overflow"], "Mobile Works did not expand accessibly with all destinations in the burger panel: " + json.dumps(mobile_works))
+    capture_screenshot(cdp, "navigation-mobile-works.png", full_page=False)
+    cdp.evaluate("""
+        (() => {
+            const child=document.querySelector('[data-works-section="illustration"]');
+            child.addEventListener('click',event=>event.preventDefault(),{once:true});
+            child.click();
+        })()
+    """)
+    expect(cdp.evaluate("!document.querySelector('.nav').classList.contains('open') && document.querySelector('.menu-toggle').getAttribute('aria-expanded') === 'false' && document.querySelector('[data-works-toggle]').getAttribute('aria-expanded') === 'false'") is True, "Selecting a mobile Works child did not close the Works and burger menus")
+    checks += 3
+
+    mobile_work_routes = [
+        ("illustration.html", "illustration"),
+        ("portraits.html", "portraits"),
+        ("logos.html", "logos"),
+    ]
+    for route, expected_child in mobile_work_routes:
+        cdp.navigate(BASE + route)
+        cdp.wait_for(f"Boolean(document.querySelector('[data-works-toggle][aria-current=\"page\"]') && document.querySelector('[data-works-section=\"{expected_child}\"][aria-current=\"page\"]'))", 15)
+        mobile_work_closed = cdp.evaluate("""
+            (() => {
+                const header=document.querySelector('.header').getBoundingClientRect();
+                const nav=document.querySelector('.nav');
+                const navList=document.querySelector('.nav-list');
+                const menu=document.querySelector('.menu-toggle');
+                const menuRect=menu.getBoundingClientRect();
+                const cart=document.querySelector('[data-open-cart]');
+                const topItems=[...document.querySelectorAll('.nav-list > li')].map(item => item.querySelector(':scope > a, :scope > button'));
+                return {
+                    labels:topItems.map(item => item.dataset.navSection || 'works'),
+                    worksChildren:[...document.querySelectorAll('.nav-submenu > li > a')].map(item => item.dataset.worksSection),
+                    graphicDesignLinks:document.querySelectorAll('.nav a[href*="graphic-design"]').length,
+                    directWorksChildren:document.querySelectorAll('.nav-list > li > [data-works-section]').length,
+                    currentTop:topItems.filter(item => item.hasAttribute('aria-current')).map(item => item.dataset.navSection || 'works'),
+                    currentChild:document.querySelector('[data-works-section][aria-current]')?.dataset.worksSection || '',
+                    menuDisplay:getComputedStyle(menu).display,
+                    menuInsideHeader:menuRect.left >= header.left && menuRect.right <= header.right,
+                    navPosition:getComputedStyle(nav).position,
+                    navVisibility:getComputedStyle(nav).visibility,
+                    navDirection:getComputedStyle(navList).flexDirection,
+                    cartDisplay:getComputedStyle(document.querySelector('.header-cart-slot')).display,
+                    cartVisibility:getComputedStyle(cart).visibility,
+                    cartTabIndex:cart.tabIndex,
+                    overflow:document.documentElement.scrollWidth > innerWidth
+                };
+            })()
+        """)
+        expect(mobile_work_closed["labels"] == ["home", "works", "stories", "contact", "store"] and mobile_work_closed["worksChildren"] == ["illustration", "portraits", "logos"] and mobile_work_closed["graphicDesignLinks"] == 0 and mobile_work_closed["directWorksChildren"] == 0, f"Mobile navigation hierarchy was incorrect on {route}: " + json.dumps(mobile_work_closed))
+        expect(mobile_work_closed["currentTop"] == ["works"] and mobile_work_closed["currentChild"] == expected_child and mobile_work_closed["menuDisplay"] == "flex" and mobile_work_closed["menuInsideHeader"] and mobile_work_closed["navPosition"] == "absolute" and mobile_work_closed["navVisibility"] == "hidden" and mobile_work_closed["navDirection"] == "column" and mobile_work_closed["cartDisplay"] == "none" and mobile_work_closed["cartVisibility"] == "hidden" and mobile_work_closed["cartTabIndex"] == -1 and not mobile_work_closed["overflow"], f"Closed mobile navigation layout regressed on {route}: " + json.dumps(mobile_work_closed))
+
+        cdp.evaluate("document.querySelector('.menu-toggle').click(); document.querySelector('[data-works-toggle]').click()")
+        cdp.wait_for("getComputedStyle(document.querySelector('.nav')).visibility === 'visible' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 1 && getComputedStyle(document.querySelector('.nav-submenu')).display === 'grid'", 5)
+        mobile_work_open = cdp.evaluate("""
+            (() => {
+                const nav=document.querySelector('.nav');
+                const submenu=document.querySelector('.nav-submenu');
+                const navRect=nav.getBoundingClientRect();
+                const submenuRect=submenu.getBoundingClientRect();
+                const children=[...submenu.querySelectorAll('a')];
+                const store=document.querySelector('[data-nav-section="store"]').getBoundingClientRect();
+                return {
+                    navOpen:nav.classList.contains('open'),
+                    navVisible:getComputedStyle(nav).visibility === 'visible' && Number(getComputedStyle(nav).opacity) === 1,
+                    worksExpanded:document.querySelector('[data-works-toggle]').getAttribute('aria-expanded'),
+                    submenuDisplay:getComputedStyle(submenu).display,
+                    submenuPosition:getComputedStyle(submenu).position,
+                    childLabels:children.map(child => child.textContent.trim()),
+                    childrenInside:children.every(child => { const rect=child.getBoundingClientRect(); return rect.left >= submenuRect.left && rect.right <= navRect.right && rect.top >= navRect.top && rect.bottom <= navRect.bottom; }),
+                    storeInside:store.left >= navRect.left && store.right <= navRect.right && store.top >= navRect.top && store.bottom <= navRect.bottom,
+                    navInsideViewport:navRect.left >= 0 && navRect.right <= innerWidth,
+                    overflow:document.documentElement.scrollWidth > innerWidth || submenu.scrollWidth > submenu.clientWidth
+                };
+            })()
+        """)
+        expect(mobile_work_open["navOpen"] and mobile_work_open["navVisible"] and mobile_work_open["worksExpanded"] == "true" and mobile_work_open["submenuDisplay"] == "grid" and mobile_work_open["submenuPosition"] == "static" and mobile_work_open["childLabels"] == ["Illustration", "Portraits", "Logos"] and mobile_work_open["childrenInside"] and mobile_work_open["storeInside"] and mobile_work_open["navInsideViewport"] and not mobile_work_open["overflow"], f"Expanded mobile Works layout regressed on {route}: " + json.dumps(mobile_work_open))
+        capture_screenshot(cdp, f"navigation-mobile-{expected_child}.png", full_page=False)
+        cdp.evaluate("document.querySelector('.menu-toggle').click()")
+        checks += 3
+
+    cdp.navigate(BASE + "store.html", "document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === 3")
     mobile_state = cdp.evaluate("""
         (() => {
             const banner=document.querySelector('.shop-banner').getBoundingClientRect();
@@ -423,6 +694,8 @@ try:
             return {
                 cards:document.querySelectorAll('.shop-product').length,
                 cartDisplay:getComputedStyle(cart).display,
+                cartVisibility:getComputedStyle(cart).visibility,
+                cartTabIndex:cart.tabIndex,
                 cartInHeader:Boolean(cart.closest('.header')),
                 cartWidth:cartRect.width,
                 cartOverlap:overlaps(cartRect,cardRect) || overlaps(cartRect,mascot),
@@ -438,7 +711,7 @@ try:
             };
         })()
     """)
-    expect(mobile_state["cards"] == 3 and mobile_state["cartDisplay"] != "none" and mobile_state["cartInHeader"] and mobile_state["cartWidth"] < 100 and not mobile_state["cartOverlap"] and mobile_state["navToggle"] != "none", "Mobile Shop catalog, compact cart access, or navigation did not render without overlap")
+    expect(mobile_state["cards"] == 3 and mobile_state["cartDisplay"] != "none" and mobile_state["cartVisibility"] == "visible" and mobile_state["cartTabIndex"] == 0 and mobile_state["cartInHeader"] and mobile_state["cartWidth"] < 100 and not mobile_state["cartOverlap"] and mobile_state["navToggle"] != "none", "Mobile Shop catalog, compact cart access, or navigation did not render without overlap")
     expect(mobile_state["columns"] == 2 and mobile_state["bannerHeight"] <= 220 and mobile_state["bannerEdges"] and abs(mobile_state["bannerHeaderGap"]) < 1 and mobile_state["addButtons"] == 0 and not mobile_state["overflow"], "Mobile full-bleed banner/grid layout regressed")
     expect(0 <= mobile_state["titlePriceGap"] <= 8 and mobile_state["cardRadius"] >= 10, "Mobile card rounding or title/price spacing regressed")
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
@@ -698,7 +971,7 @@ try:
     storefront_id = storefront_created["id"]
     fixture_ids.append(storefront_id)
 
-    cdp.navigate(BASE + "graphic-design.html")
+    cdp.navigate(BASE + "store.html")
     cdp.wait_for("document.querySelectorAll('.shop-product').length === 5", 15)
     storefront_state = cdp.evaluate(f"""
         (() => {{
@@ -726,7 +999,7 @@ try:
         }})()
     """)
     expect(storefront_state["cards"] == 5 and storefront_state["headings"] == ["Art Prints", "Regression", "More from the studio"], "Category and uncategorized storefront sections were incorrect")
-    expect(storefront_state["inquiryHref"] == "index.html#contact" and storefront_state["externalHref"] == storefront_fields["externalUrl"] and storefront_state["internalHook"].startswith("graphic-design.html?product="), "Product action links were unsafe or incorrect")
+    expect(storefront_state["inquiryHref"] == "index.html#contact" and storefront_state["externalHref"] == storefront_fields["externalUrl"] and storefront_state["internalHook"].startswith("store.html?product="), "Product action links were unsafe or incorrect")
     expect(storefront_state["inquiryPrimary"] == uploaded_path and storefront_state["inquiryAlt"] == "Uploaded primary alt text" and storefront_state["inquiryImages"] == 2, "Ordered gallery or primary alt text was not used by the storefront")
     expect("$18.00" in storefront_state["inquiryPrice"] and "$22.00" in storefront_state["inquiryPrice"] and storefront_state["inquiryBadges"] == ["Sale", "New"], "Sale price or minimal inquiry badges were incorrect")
     expect(storefront_state["externalImages"] == 2 and storefront_state["externalBadges"] == ["Sale", "Sold Out", "Limited"] and storefront_state["badgesInsideImage"] and storefront_state["soldOut"], "Sold-out, hover-image, or badge presentation was incorrect")
@@ -930,6 +1203,7 @@ try:
     cdp.navigate(BASE + "illustration.html")
     cdp.wait_for(f"document.querySelectorAll('[data-category-projects] .gallery-card').length === {illustration_count}", 15)
     expect(cdp.evaluate("document.querySelectorAll('[data-category-projects] .gallery-card').length") == illustration_count, "Public Projects gallery did not match its API")
+    expect(cdp.evaluate("document.querySelector('[data-works-toggle]').getAttribute('aria-current') === 'page' && document.querySelector('[data-works-section=\"illustration\"]').getAttribute('aria-current') === 'page' && document.querySelector('[data-open-cart]').tabIndex === -1") is True, "Illustration did not retain Works active state with hidden Cart")
 
     status, public_content = api_request("content")
     expect(status == 200 and public_content.get("entries"), "No published Story was available for regression")
@@ -937,8 +1211,10 @@ try:
     cdp.navigate(BASE + "stories.php")
     cdp.wait_for("document.querySelector('[data-stories-results]').getAttribute('aria-busy') === 'false'", 15)
     expect(cdp.evaluate("document.querySelectorAll('[data-stories-list] .story-card').length") == len(public_content["entries"]), "Stories archive did not render published entries")
+    expect(cdp.evaluate("document.querySelector('[data-nav-section=\"stories\"]').getAttribute('aria-current') === 'page' && document.querySelector('[data-open-cart]').tabIndex === -1") is True, "Stories navigation state or hidden Cart regressed")
     cdp.navigate(BASE + "story.php?slug=" + urllib.parse.quote(published_story["slug"]))
     expect(cdp.evaluate("document.querySelector('.story-article h1')?.textContent || ''") == published_story["title"], "Story reader did not render the selected published story")
+    expect(cdp.evaluate("document.querySelector('[data-nav-section=\"stories\"]').getAttribute('aria-current') === 'page' && document.querySelector('[data-open-cart]').tabIndex === -1") is True, "Story reader navigation state or hidden Cart regressed")
 
     cdp.navigate(BASE + "index.html#contact")
     cdp.wait_for("location.hash === '#contact' && document.querySelector('#contact') && document.querySelectorAll('.home-gallery .gallery-card').length > 0", 15)
@@ -946,11 +1222,13 @@ try:
         (() => {
             const contact=document.querySelector('#contact').getBoundingClientRect();
             const header=document.querySelector('.header').getBoundingClientRect();
-            return {hash:location.hash, contactVisible:contact.top >= header.height - 6 && contact.top < innerHeight, projects:document.querySelectorAll('.home-gallery .gallery-card').length};
+            const current=[...document.querySelectorAll('.nav-list > li > [aria-current]')].map(item=>item.dataset.navSection || 'works');
+            const cart=document.querySelector('[data-open-cart]');
+            return {hash:location.hash, contactVisible:contact.top >= header.height - 6 && contact.top < innerHeight, projects:document.querySelectorAll('.home-gallery .gallery-card').length,current,contactCurrent:document.querySelector('[data-nav-section="contact"]').getAttribute('aria-current'),cartHidden:getComputedStyle(cart).visibility === 'hidden' && cart.tabIndex === -1,compact:document.querySelector('.header').classList.contains('is-compact')};
         })()
     """)
-    expect(contact_state["hash"] == "#contact" and contact_state["contactVisible"] and contact_state["projects"] > 0, "Contact deep link or homepage project gallery regressed")
-    checks += 5
+    expect(contact_state["hash"] == "#contact" and contact_state["contactVisible"] and contact_state["projects"] > 0 and contact_state["current"] == ["contact"] and contact_state["contactCurrent"] == "location" and contact_state["cartHidden"] and contact_state["compact"], "Contact deep link, active state, compact header, or homepage project gallery regressed: " + json.dumps(contact_state))
+    checks += 8
 
     cdp.call("Emulation.setDeviceMetricsOverride", {
         "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,

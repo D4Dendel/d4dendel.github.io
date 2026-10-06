@@ -14,9 +14,13 @@ syncPublicButtonContrast();
 
 const menuToggle = document.querySelector('.menu-toggle');
 const nav = document.querySelector('.nav');
+const publicHeader = document.querySelector('.header');
+const worksItem = nav?.querySelector('.nav-works');
+const worksToggle = nav?.querySelector('[data-works-toggle]');
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const isMobileViewport = window.matchMedia('(max-width: 760px)').matches;
+const mobileNavigation = window.matchMedia('(max-width: 760px)');
 
 // Public personalization creates no floating elements or listeners inside the CMS.
 if (document.body.dataset.page !== 'admin') {
@@ -121,42 +125,131 @@ if (document.body.dataset.page !== 'admin') {
   }
 }
 
-// Resolve public destinations from their existing links, including nested project pages.
+// Keep public navigation state centralized for archives, child routes, Store hooks, and fragments.
 if (nav && document.body.dataset.page !== 'admin') {
-  const primaryLinks = [...nav.querySelectorAll('a[href]')];
-  const normalizeNavPath = (path) => path.replace(/\/index\.html$/, '/');
+  const cartButton = document.querySelector('[data-open-cart]');
   const syncCurrentNavigation = () => {
     const current = new URL(window.location.href);
-    const currentPath = normalizeNavPath(current.pathname);
-    const destinations = primaryLinks.map((link) => ({ link, url: new URL(link.href) }));
-    const samePage = (url) => url.origin === current.origin && normalizeNavPath(url.pathname) === currentPath;
-    const active = destinations.find(({ url }) => url.hash && url.hash === current.hash && samePage(url))
-      || destinations.find(({ url }) => !url.hash && samePage(url))
-      || destinations.find(({ url }) => {
-        if (url.hash || url.origin !== current.origin) return false;
-        const parentPath = url.pathname.replace(/\.(?:html|php)$/, '/');
-        return current.pathname.startsWith(parentPath)
-          || (url.pathname.endsWith('/stories.php') && current.pathname === url.pathname.replace(/stories\.php$/, 'story.php'));
-      });
-    primaryLinks.forEach((link) => link.removeAttribute('aria-current'));
-    if (active) active.link.setAttribute('aria-current', active.url.hash ? 'location' : 'page');
+    const path = current.pathname.toLowerCase();
+    const file = path.split('/').pop() || 'index.html';
+    const explicitSection = document.body.dataset.navSection || '';
+    let worksSection = '';
+    if (/(?:^|\/)illustration(?:\/|\.html$)/.test(path)) worksSection = 'illustration';
+    if (/(?:^|\/)portraits?(?:\/|\.html$)/.test(path)) worksSection = 'portraits';
+    if (/(?:^|\/)logos?(?:\/|\.html$)/.test(path)) worksSection = 'logos';
+
+    let activeSection = explicitSection;
+    if (!activeSection && worksSection) activeSection = 'works';
+    if (!activeSection && (file === 'stories.php' || file === 'story.php')) activeSection = 'stories';
+    if (!activeSection && file === 'store.html') activeSection = 'store';
+    if (!activeSection && (file === 'index.html' || file === '')) activeSection = current.hash === '#contact' ? 'contact' : 'home';
+
+    nav.querySelectorAll('[aria-current]').forEach((item) => item.removeAttribute('aria-current'));
+    const activeTopLevel = activeSection === 'works'
+      ? worksToggle
+      : nav.querySelector(`[data-nav-section="${activeSection}"]`);
+    if (activeTopLevel) activeTopLevel.setAttribute('aria-current', activeSection === 'contact' ? 'location' : 'page');
+    if (worksSection) nav.querySelector(`[data-works-section="${worksSection}"]`)?.setAttribute('aria-current', 'page');
+
+    const storeExperience = activeSection === 'store';
+    document.body.classList.toggle('is-store-experience', storeExperience);
+    if (cartButton) {
+      cartButton.setAttribute('aria-hidden', String(!storeExperience));
+      cartButton.tabIndex = storeExperience ? 0 : -1;
+      if (storeExperience && document.querySelector('[data-cart-panel]')) cartButton.setAttribute('aria-controls', 'shop-cart-panel');
+      else cartButton.removeAttribute('aria-controls');
+    }
   };
   syncCurrentNavigation();
   window.addEventListener('hashchange', syncCurrentNavigation);
 }
 
+let worksCloseTimer = 0;
+let worksOpenedByHover = false;
+const setWorksOpen = (open, returnFocus = false) => {
+  if (!worksItem || !worksToggle) return;
+  window.clearTimeout(worksCloseTimer);
+  worksItem.classList.toggle('is-open', open);
+  worksToggle.setAttribute('aria-expanded', String(open));
+  if (returnFocus) worksToggle.focus();
+};
+
+worksToggle?.addEventListener('click', () => {
+  if (!mobileNavigation.matches && worksOpenedByHover) {
+    worksOpenedByHover = false;
+    setWorksOpen(true);
+    return;
+  }
+  setWorksOpen(worksToggle.getAttribute('aria-expanded') !== 'true');
+});
+
+worksToggle?.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    setWorksOpen(true);
+    worksItem?.querySelector('.nav-submenu a')?.focus();
+  }
+});
+
+worksItem?.addEventListener('pointerenter', () => {
+  if (!mobileNavigation.matches) {
+    worksOpenedByHover = true;
+    setWorksOpen(true);
+  }
+});
+
+worksItem?.addEventListener('pointerleave', () => {
+  if (mobileNavigation.matches) return;
+  worksOpenedByHover = false;
+  worksCloseTimer = window.setTimeout(() => {
+    if (!worksItem.contains(document.activeElement)) setWorksOpen(false);
+  }, 120);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (worksItem && !worksItem.contains(event.target)) setWorksOpen(false);
+});
+
+document.addEventListener('focusin', (event) => {
+  if (worksItem && !worksItem.contains(event.target)) setWorksOpen(false);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && worksToggle?.getAttribute('aria-expanded') === 'true') {
+    event.preventDefault();
+    setWorksOpen(false, true);
+  }
+});
+
+mobileNavigation.addEventListener?.('change', () => setWorksOpen(false));
+
 if (menuToggle && nav) {
   menuToggle.addEventListener('click', () => {
     const isOpen = nav.classList.toggle('open');
     menuToggle.setAttribute('aria-expanded', String(isOpen));
+    if (!isOpen) setWorksOpen(false);
   });
 
   nav.querySelectorAll('a').forEach((link) => {
     link.addEventListener('click', () => {
       nav.classList.remove('open');
       menuToggle.setAttribute('aria-expanded', 'false');
+      setWorksOpen(false);
     });
   });
+}
+
+if (publicHeader && document.body.dataset.page !== 'admin') {
+  let compactHeaderFrame = 0;
+  const syncCompactHeader = () => {
+    compactHeaderFrame = 0;
+    publicHeader.classList.toggle('is-compact', window.scrollY > 72);
+  };
+  const scheduleCompactHeader = () => {
+    if (!compactHeaderFrame) compactHeaderFrame = window.requestAnimationFrame(syncCompactHeader);
+  };
+  syncCompactHeader();
+  window.addEventListener('scroll', scheduleCompactHeader, { passive: true });
 }
 
 const revealElements = document.querySelectorAll('.reveal');
@@ -2735,7 +2828,7 @@ const renderCart = () => {
 const shopProductHref = (product) => {
   if (product.purchaseAction === 'external' && product.externalUrl) return product.externalUrl;
   if (product.purchaseAction === 'inquiry') return 'index.html#contact';
-  return `graphic-design.html?product=${encodeURIComponent(product.slug)}`;
+  return `store.html?product=${encodeURIComponent(product.slug)}`;
 };
 
 const publicProductBadges = (product) => (product.badges || [])
