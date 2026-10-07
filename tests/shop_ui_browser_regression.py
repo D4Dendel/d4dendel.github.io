@@ -383,6 +383,7 @@ status, initial_shop_response = api_request("shop")
 expect(status == 200 and initial_shop_response.get("products"), "Could not capture the initial public Shop")
 initial_public_products = initial_shop_response["products"]
 initial_public_count = len(initial_public_products)
+initial_home_featured_count = min(4, sum(1 for product in initial_public_products if product.get("featured") is True))
 status, initial_brand_response = api_request("brand")
 expect(status == 200 and initial_brand_response.get("brand"), "Could not capture the initial Brand Identity")
 initial_brand = initial_brand_response["brand"]
@@ -462,6 +463,144 @@ try:
             cdp.wait_for("Boolean(document.querySelector('.story-article h1'))", 15)
             capture_screenshot(cdp, "global-brand-story-desktop.png")
         checks += 5
+
+    homepage_viewports = [
+        (1366, 768, "homepage-polish-1366x768.png"),
+        (1440, 900, "homepage-polish-1440x900.png"),
+        (1440, 1000, "homepage-polish-1440x1000.png"),
+        (390, 844, "homepage-polish-390x844.png"),
+    ]
+    expected_welcome = f"Welcome to {initial_brand['brandName']}\u2019s little corner of the internet."
+    for width, height, screenshot_name in homepage_viewports:
+        cdp.call("Emulation.setDeviceMetricsOverride", {
+            "width": width, "height": height, "deviceScaleFactor": 1, "mobile": width <= 600,
+        })
+        cdp.navigate(BASE + "index.html", "document.readyState !== 'loading' && document.documentElement.dataset.appReady === 'true' && location.pathname.endsWith('/index.html') && Boolean(document.querySelector('[data-hero-brand-welcome]'))")
+        cdp.wait_for(f"document.querySelector('[data-hero-brand-welcome]')?.textContent === {js_string(expected_welcome)}", 15)
+        if initial_home_featured_count:
+            cdp.wait_for(f"!document.querySelector('[data-home-featured-products]').hidden && document.querySelectorAll('[data-home-featured-product-list] .shop-product').length === {initial_home_featured_count}", 15)
+            cdp.wait_for("[...document.querySelectorAll('[data-home-featured-product-list] .shop-product-image.is-primary')].every(image => image.complete && image.naturalWidth > 0)", 15)
+        else:
+            cdp.wait_for("document.querySelector('[data-home-featured-products]').hidden", 15)
+        homepage_state = cdp.evaluate("""
+            (() => {
+                const header=document.querySelector('.header').getBoundingClientRect();
+                const hero=document.querySelector('.hero').getBoundingClientRect();
+                const actions=[...document.querySelectorAll('.hero-actions a')];
+                const cards=[...document.querySelectorAll('[data-home-featured-product-list] .shop-product')];
+                const grid=document.querySelector('[data-home-featured-product-list]');
+                return {
+                    headlineStart:document.querySelector('.hero h1').textContent.includes('Art that turns'),
+                    headlineWords:document.querySelector('[data-typed-words]').dataset.typedWords,
+                    headlineEnd:document.querySelector('.hero-final-line').textContent.replace(/\s+/g,' ').trim(),
+                    welcome:document.querySelector('[data-hero-brand-welcome]').textContent,
+                    ctas:actions.map(link=>({text:link.textContent.trim(),href:link.getAttribute('href')})),
+                    actionBottom:Math.max(...actions.map(link=>link.getBoundingClientRect().bottom)),
+                    heroTop:hero.top,headerBottom:header.bottom,
+                    featuredHidden:document.querySelector('[data-home-featured-products]').hidden,
+                    featuredCards:cards.length,
+                    featuredColumns:cards.length ? Math.round(grid.getBoundingClientRect().width/cards[0].getBoundingClientRect().width) : 0,
+                    featuredMinimal:cards.every(card=>card.querySelector('img')&&card.querySelector('h3')&&card.querySelector('.shop-product-price')&&!card.querySelector('.shop-product-description')&&!card.querySelector('[data-add-cart]')),
+                    overflow:document.documentElement.scrollWidth>innerWidth
+                };
+            })()
+        """)
+        expect(homepage_state["headlineStart"] and homepage_state["headlineWords"].split(",")[0] == "ideas" and homepage_state["headlineEnd"] == "into unforgettable stories." and homepage_state["welcome"] == expected_welcome, f"Homepage hero copy regressed at {width}x{height}: " + json.dumps(homepage_state))
+        expect(homepage_state["ctas"] == [{"text": "EXPLORE MY WORK", "href": "#gallery"}, {"text": "VISIT THE STORE", "href": "store.html"}], f"Homepage CTA wording or routes regressed at {width}x{height}")
+        expect(homepage_state["featuredCards"] == initial_home_featured_count and homepage_state["featuredHidden"] == (initial_home_featured_count == 0) and homepage_state["featuredMinimal"] and not homepage_state["overflow"], f"Homepage Featured Products or overflow regressed at {width}x{height}: " + json.dumps(homepage_state))
+        if width > 900:
+            expect(homepage_state["actionBottom"] <= height and homepage_state["heroTop"] >= homepage_state["headerBottom"] - 1, f"Homepage CTA was below the initial desktop viewport at {width}x{height}: " + json.dumps(homepage_state))
+        elif initial_home_featured_count:
+            expect(homepage_state["featuredColumns"] == 2, "Homepage Featured Products did not retain two mobile columns at 390px")
+        # Review the initial viewport after its existing reveal transitions settle.
+        cdp.wait_for("Number(getComputedStyle(document.querySelector('.hero')).opacity) === 1", 5)
+        cdp.evaluate("new Promise(resolve=>setTimeout(resolve,700))", await_promise=True)
+        capture_screenshot(cdp, screenshot_name, full_page=False)
+        checks += 4
+
+    homepage_scenarios = cdp.evaluate("""
+        (() => {
+            const live=shopProducts.slice();
+            const base=live[0];
+            const make=(index,overrides={})=>({...base,id:99000+index,slug:`homepage-scenario-${index}`,title:`Homepage scenario ${index}`,featured:true,...overrides});
+            const scenarios=[];
+            for(let count=0;count<=5;count+=1){
+                const items=Array.from({length:count},(_,index)=>make(index));
+                items.push(make(50,{featured:false,title:'Excluded unfeatured product'}));
+                renderHomeFeaturedProducts(items);
+                const section=document.querySelector('[data-home-featured-products]');
+                const grid=document.querySelector('[data-home-featured-product-list]');
+                const cards=[...grid.querySelectorAll('.shop-product')];
+                const boxes=cards.map(card=>card.getBoundingClientRect());
+                const balanced=!boxes.length||Math.abs(((Math.min(...boxes.map(box=>box.left))+Math.max(...boxes.map(box=>box.right)))/2)-(grid.getBoundingClientRect().left+grid.getBoundingClientRect().width/2))<1;
+                scenarios.push({requested:count,shown:cards.length,hidden:section.hidden,balanced});
+            }
+            renderHomeFeaturedProducts([
+                make(60,{purchaseAction:'internal'}),
+                make(61,{purchaseAction:'external',externalUrl:'https://example.com/home-featured'}),
+                make(62,{purchaseAction:'inquiry'})
+            ]);
+            const actionHrefs=[...document.querySelectorAll('[data-home-featured-product-list] .shop-product-link')].map(link=>link.getAttribute('href'));
+            const grid=document.querySelector('[data-home-featured-product-list]');
+            const originalEdge=grid.dataset.galleryEdge;
+            const edgeStates=['rounded','slight','square','none'].map(edge=>{
+                grid.dataset.galleryEdge=edge;
+                const card=document.querySelector('[data-home-featured-product-list] .shop-product');
+                return {edge,radius:parseFloat(getComputedStyle(card).borderTopLeftRadius),shadow:getComputedStyle(card).boxShadow,border:getComputedStyle(card).borderTopColor};
+            });
+            if(originalEdge) grid.dataset.galleryEdge=originalEdge;
+            else delete grid.dataset.galleryEdge;
+            renderHomeFeaturedProducts(live);
+            return {scenarios,actionHrefs,edgeStates,restored:document.querySelectorAll('[data-home-featured-product-list] .shop-product').length};
+        })()
+    """)
+    expect(homepage_scenarios["scenarios"] == [
+        {"requested": 0, "shown": 0, "hidden": True, "balanced": True},
+        {"requested": 1, "shown": 1, "hidden": False, "balanced": True},
+        {"requested": 2, "shown": 2, "hidden": False, "balanced": True},
+        {"requested": 3, "shown": 3, "hidden": False, "balanced": True},
+        {"requested": 4, "shown": 4, "hidden": False, "balanced": True},
+        {"requested": 5, "shown": 4, "hidden": False, "balanced": True},
+    ], "Homepage 0/1/2/3/4+ Featured Product rendering was incorrect: " + json.dumps(homepage_scenarios))
+    expect(homepage_scenarios["actionHrefs"] == ["store.html?product=homepage-scenario-60", "https://example.com/home-featured", "index.html#contact"], "Homepage Featured Product actions diverged from Store card behavior")
+    expect(homepage_scenarios["edgeStates"][0]["radius"] >= 20 and homepage_scenarios["edgeStates"][1]["radius"] == 8 and homepage_scenarios["edgeStates"][2]["radius"] == 0 and homepage_scenarios["edgeStates"][3]["radius"] == 0 and homepage_scenarios["edgeStates"][3]["shadow"] == "none", "Homepage Featured Product cards did not follow theme edge settings: " + json.dumps(homepage_scenarios["edgeStates"]))
+    expect(homepage_scenarios["restored"] == initial_home_featured_count, "Homepage Featured Products were not restored after in-memory scenario testing")
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
+    })
+    cdp.evaluate("renderHomeFeaturedProducts(shopProducts.map(product=>({...product,featured:true}))); document.querySelector('[data-home-featured-products]').scrollIntoView({block:'center',behavior:'instant'})")
+    cdp.wait_for("document.querySelector('[data-home-featured-products]').classList.contains('visible') && [...document.querySelectorAll('[data-home-featured-product-list] .shop-product-image.is-primary')].every(image=>image.complete&&image.naturalWidth>0)", 15)
+    cdp.evaluate("new Promise(resolve=>setTimeout(resolve,300))", await_promise=True)
+    capture_screenshot(cdp, "homepage-featured-products-1440.png", full_page=False)
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
+    })
+    cdp.evaluate("document.querySelector('[data-home-featured-products]').scrollIntoView({block:'start',behavior:'instant'})")
+    cdp.wait_for("getComputedStyle(document.querySelector('.nav')).visibility === 'hidden' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 0", 5)
+    featured_mobile_visual = cdp.evaluate("({cards:document.querySelectorAll('[data-home-featured-product-list] .shop-product').length,columns:Math.round(document.querySelector('[data-home-featured-product-list]').getBoundingClientRect().width/document.querySelector('[data-home-featured-product-list] .shop-product').getBoundingClientRect().width),overflow:document.documentElement.scrollWidth>innerWidth})")
+    expect(featured_mobile_visual == {"cards": min(4, initial_public_count), "columns": 2, "overflow": False}, "Four-product Homepage visual fixture did not retain its two-column mobile layout: " + json.dumps(featured_mobile_visual))
+    capture_screenshot(cdp, "homepage-featured-products-390.png", full_page=False)
+    cdp.evaluate("renderHomeFeaturedProducts(shopProducts); scrollTo({top:0,left:0,behavior:'instant'})")
+    cdp.call("Emulation.setDeviceMetricsOverride", {
+        "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False,
+    })
+    checks += 5
+
+    if ARTIFACT_DIR:
+        # Visual fixtures stay in browser memory; never publish or upload them.
+        for count in range(6):
+            cdp.evaluate(f"renderHomeFeaturedProducts(Array.from({{length:{count}}},(_,i)=>({{...shopProducts[i%shopProducts.length],featured:true}}))); document.querySelector('[data-home-featured-products]').scrollIntoView({{block:'center',behavior:'instant'}})")
+            cdp.evaluate("new Promise(resolve=>setTimeout(resolve,700))", await_promise=True)
+            capture_screenshot(cdp, f"homepage-featured-count-{count}.png", full_page=False)
+        for label, theme in [
+            ("pastel", {"accentColor": "#d58aaa", "pageBackground": "#fff4f8", "surfaceColor": "#fffafd", "primaryText": "#513747", "buttonRadius": "8px", "galleryLayout": "clean", "galleryEdge": "slight"}),
+            ("midnight", {"accentColor": "#8da2ff", "pageBackground": "#171925", "surfaceColor": "#242738", "primaryText": "#f3efff", "buttonRadius": "4px", "galleryLayout": "editorial", "galleryEdge": "square"}),
+        ]:
+            cdp.evaluate(f"applyPublicTheme({js_string(theme)}); scrollTo({{top:0,left:0,behavior:'instant'}})")
+            cdp.evaluate("new Promise(resolve=>setTimeout(resolve,700))", await_promise=True)
+            capture_screenshot(cdp, f"homepage-theme-{label}.png", full_page=False)
+        cdp.evaluate("renderHomeFeaturedProducts(shopProducts); fetch('api/index.php?action=theme').then(r=>r.json()).then(d=>applyPublicTheme(d.theme))", await_promise=True)
+        cdp.evaluate("scrollTo({top:0,left:0,behavior:'instant'})")
 
     cdp.call("Page.bringToFront")
     dropdown_state = cdp.evaluate("""
@@ -625,7 +764,8 @@ try:
                 root.style.setProperty('--panel-strong',surface);
                 root.style.setProperty('--text',text);
                 syncPublicSurfaceContrast();
-                return {name,submenu:getComputedStyle(document.querySelector('.nav-submenu')).backgroundColor,active:getComputedStyle(activeElement).color,focus:getComputedStyle(document.querySelector('[data-works-toggle]')).outlineColor};
+                const featuredCard=document.querySelector('[data-home-featured-product-list] .shop-product');
+                return {name,submenu:getComputedStyle(document.querySelector('.nav-submenu')).backgroundColor,active:getComputedStyle(activeElement).color,focus:getComputedStyle(document.querySelector('[data-works-toggle]')).outlineColor,featuredCard:featuredCard ? getComputedStyle(featuredCard).backgroundColor : ''};
             });
             names.forEach(name=>original[name] ? root.style.setProperty(name,original[name]) : root.style.removeProperty(name));
             syncPublicSurfaceContrast();
@@ -633,7 +773,7 @@ try:
             return signatures;
         })()
     """)
-    expect(len({item["submenu"] for item in theme_signatures}) == 3 and len({item["active"] for item in theme_signatures}) == 3, "Default, Pastel, and Midnight token palettes did not restyle navigation: " + json.dumps(theme_signatures))
+    expect(len({item["submenu"] for item in theme_signatures}) == 3 and len({item["active"] for item in theme_signatures}) == 3 and (initial_home_featured_count == 0 or len({item["featuredCard"] for item in theme_signatures}) == 3), "Default, Pastel, and Midnight token palettes did not restyle navigation and Homepage products: " + json.dumps(theme_signatures))
     checks += 14
 
     pointer_routes = [
@@ -2132,13 +2272,14 @@ try:
                     color:root.getPropertyValue('--brand-name-color').trim(),brandFont:root.getPropertyValue('--font-brand').trim(),
                     headingFont:root.getPropertyValue('--font-heading').trim(),bodyFont:root.getPropertyValue('--font-body').trim(),uiFont:root.getPropertyValue('--font-ui').trim(),
                     footer:document.querySelector('.footer-brand-name').textContent,socials:document.querySelectorAll('.footer-social-link').length,
+                    welcome:document.querySelector('[data-hero-brand-welcome]')?.textContent || '',
                     pointer:document.querySelectorAll('.pointer-canvas').length,overflow:document.documentElement.scrollWidth>innerWidth
                 }};
             }})()
         """)
         propagation_states.append(state)
         capture_screenshot(cdp, f"brand-gif-propagation-{label}.png")
-    expect(all(state["brand"] == brand_browser_name and state["logo"].endswith(both_json["brand"]["logoPath"]) and state["logoLoaded"] and state["icon"].endswith(both_json["brand"]["siteIconPath"]) and state["color"] == "#245f4b" and "Nunito" in state["brandFont"] and "Georgia" in state["headingFont"] and "system-ui" in state["bodyFont"] and "Georgia" in state["uiFont"] and state["footer"] == brand_browser_name and state["socials"] == 1 and state["pointer"] == 0 and not state["overflow"] for state in propagation_states), "Saved Brand Identity did not propagate across public routes: " + json.dumps(propagation_states))
+    expect(all(state["brand"] == brand_browser_name and state["logo"].endswith(both_json["brand"]["logoPath"]) and state["logoLoaded"] and state["icon"].endswith(both_json["brand"]["siteIconPath"]) and state["color"] == "#245f4b" and "Nunito" in state["brandFont"] and "Georgia" in state["headingFont"] and "system-ui" in state["bodyFont"] and "Georgia" in state["uiFont"] and state["footer"] == brand_browser_name and state["socials"] == 1 and (state["route"] != "home" or state["welcome"] == f"Welcome to {brand_browser_name}\u2019s little corner of the internet.") and state["pointer"] == 0 and not state["overflow"] for state in propagation_states), "Saved Brand Identity did not propagate across public routes: " + json.dumps(propagation_states))
     checks += 6
 
     restore_brand_identity(initial_brand)

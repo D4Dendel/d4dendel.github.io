@@ -2925,7 +2925,7 @@ const applyPublicTheme = (theme) => {
   document.dispatchEvent(new Event('public-theme-applied'));
   if (allowedThemeValues.radius.has(theme.buttonRadius)) document.documentElement.style.setProperty('--button-radius', theme.buttonRadius);
   if (!allowedThemeValues.galleryLayout.has(theme.galleryLayout) || !allowedThemeValues.galleryEdge.has(theme.galleryEdge)) return;
-  document.querySelectorAll('.home-gallery, [data-category-projects], .home-content-grid').forEach((gallery) => {
+  document.querySelectorAll('.home-gallery, [data-category-projects], .home-content-grid, .home-featured-product-grid').forEach((gallery) => {
     gallery.dataset.galleryLayout = theme.galleryLayout;
     gallery.dataset.galleryEdge = theme.galleryEdge;
   });
@@ -3104,6 +3104,9 @@ const applyPublicBrand = (incoming) => {
   root.style.setProperty('--brand-name-color', brand.brandNameColor.toLowerCase());
   syncPublicSurfaceContrast();
 
+  const heroWelcome = document.querySelector('[data-hero-brand-welcome]');
+  if (heroWelcome) heroWelcome.textContent = `Welcome to ${brand.brandName}\u2019s little corner of the internet.`;
+
   document.querySelectorAll('.logo-wrap').forEach((wrapper) => {
     const image = wrapper.querySelector('img');
     const text = wrapper.querySelector('.brand');
@@ -3261,6 +3264,8 @@ contactForm?.addEventListener('submit', async (event) => {
 });
 
 const shopProductsTarget = document.querySelector('[data-shop-products]');
+const homeFeaturedProductsSection = document.querySelector('[data-home-featured-products]');
+const homeFeaturedProductsTarget = document.querySelector('[data-home-featured-product-list]');
 const shopProductDetailView = document.querySelector('[data-shop-detail-view]');
 const shopProductDetailTarget = document.querySelector('[data-product-detail]');
 const cartPanel = document.querySelector('[data-cart-panel]');
@@ -3534,6 +3539,24 @@ const createShopProductCard = (product) => {
   link.append(media, copy);
   card.append(link);
   return card;
+};
+
+const renderHomeFeaturedProducts = (products = shopProducts) => {
+  if (!homeFeaturedProductsSection || !homeFeaturedProductsTarget) return;
+  const featuredProducts = products.filter((product) => product.featured === true).slice(0, 4);
+  homeFeaturedProductsTarget.replaceChildren(...featuredProducts.map(createShopProductCard));
+  homeFeaturedProductsSection.hidden = featuredProducts.length === 0;
+};
+
+const loadHomeFeaturedProducts = async () => {
+  if (!homeFeaturedProductsSection || !homeFeaturedProductsTarget) return;
+  try {
+    const products = await loadShopCatalog();
+    renderHomeFeaturedProducts(products);
+  } catch (error) {
+    homeFeaturedProductsTarget.replaceChildren();
+    homeFeaturedProductsSection.hidden = true;
+  }
 };
 
 const renderShopBannerArt = () => {
@@ -4346,6 +4369,7 @@ const publicHomepageReady = Promise.allSettled([
   renderManagedProjectViews(),
   loadPublicTheme(),
   loadPublicBrand(),
+  loadHomeFeaturedProducts(),
   renderPublicContent()
 ]);
 
