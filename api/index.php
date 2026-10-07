@@ -59,8 +59,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contentLength !== false && $postMa
 session_start();
 require __DIR__ . '/shop_products.php';
 require __DIR__ . '/shop_checkout.php';
+require __DIR__ . '/shop_payments.php';
+require __DIR__ . '/shop_payment_providers.php';
 
 $action = $_GET['action'] ?? 'projects';
+
+if (in_array($action, ['admin-payment-providers','save-payment-provider','payment-providers'], true)) {
+    header('Cache-Control: no-store, max-age=0');
+    $providerRegistry = new ShopPaymentProviderRegistry();
+    if ($action === 'save-payment-provider') {
+        require_post();
+        require_auth();
+        $csrf = $_POST['csrfToken'] ?? null;
+        if (!is_string($csrf) || empty($_SESSION['payment_provider_csrf'])
+            || !hash_equals($_SESSION['payment_provider_csrf'], $csrf)) {
+            json_response(['error' => 'Refresh Payments before saving settings.'], 403);
+        }
+        $input = $_POST;
+        unset($input['csrfToken']);
+        if ($_FILES) json_response(['error' => 'Payments settings do not accept uploads.'], 422);
+        try {
+            json_response(['provider' => $providerRegistry->update(db(), $input)]);
+        } catch (DomainException $error) {
+            json_response(['error' => $error->getMessage()], 422);
+        }
+    }
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') json_response(['error' => 'Method not allowed.'], 405);
+    if ($action === 'admin-payment-providers') {
+        require_auth();
+        $_SESSION['payment_provider_csrf'] ??= bin2hex(random_bytes(32));
+        json_response(['currency' => SHOP_CURRENCY, 'providers' => $providerRegistry->settings(db()),
+            'csrfToken' => $_SESSION['payment_provider_csrf']]);
+    }
+    json_response(['currency' => SHOP_CURRENCY, 'providers' => $providerRegistry->publicProviders(db())]);
+}
 
 $themeDefaults = [
     'accentColor' => '#c86f52',

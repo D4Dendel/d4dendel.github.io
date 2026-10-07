@@ -348,6 +348,7 @@ content_fixture_ids = []
 uploaded_test_paths = []
 brand_uploaded_test_paths = []
 brand_restore_required = False
+provider_settings_restore_required = False
 chrome = None
 cdp = None
 profile = tempfile.mkdtemp(prefix="dyndel-shop-browser-")
@@ -390,6 +391,18 @@ initial_brand = initial_brand_response["brand"]
 initial_pointer_brush_enabled = bool(initial_brand["pointerBrushEnabled"])
 initial_brand_updated_at = str(initial_brand["updatedAt"])
 expect(re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", initial_brand_updated_at) is not None, "Brand Identity timestamp was not restorable")
+status, initial_provider_response = api_request("admin-payment-providers", session_id=session_id)
+expect(status == 200 and len(initial_provider_response.get("providers", [])) == 2, "Could not capture Payments settings")
+initial_provider_settings = initial_provider_response["providers"]
+
+
+def restore_provider_settings():
+    for provider in initial_provider_settings:
+        expect(provider["key"] in ("paypal", "stripe"), "Unexpected provider in restore data")
+        mysql_value("UPDATE shop_payment_providers SET enabled=" + ("1" if provider["enabled"] else "0")
+                    + ",mode=" + mysql_text_literal(provider["mode"])
+                    + ",updated_at=" + mysql_text_literal(provider["updatedAt"])
+                    + " WHERE provider=" + mysql_text_literal(provider["key"]) + ";")
 
 try:
     chrome, websocket_url = start_chrome(profile)
@@ -2120,6 +2133,53 @@ try:
     expect(status == 200 and deleted_content.get("deleted"), "Disposable Content fixture was not deleted")
     content_fixture_ids.remove(content_fixture_id)
 
+    for width, height in [(1440, 1000), (390, 844)]:
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": width < 600})
+        cdp.evaluate("document.querySelector('[data-admin-module=\"payments\"]').click()")
+        cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"payments\"]').hidden && document.querySelectorAll('[data-payment-provider]').length === 2 && Boolean(paymentProviderCsrf)")
+        payment_ui = cdp.evaluate("""(() => {
+            const panel=document.querySelector('[data-admin-module-panel="payments"]');
+            return {names:[...panel.querySelectorAll('.cms-payment-provider-card h2')].map(n=>n.textContent),
+                currency:panel.querySelector('.cms-payment-currency').textContent,
+                secretInputs:panel.querySelectorAll('input[type=password]').length,
+                effects:document.querySelectorAll('.pointer-canvas,.contact-mascot').length,
+                font:getComputedStyle(panel.querySelector('h1')).fontFamily,
+                overflow:document.documentElement.scrollWidth>innerWidth};
+        })()""")
+        expect(payment_ui["names"] == ["PayPal", "Stripe"] and "USD" in payment_ui["currency"] and payment_ui["secretInputs"] == 0 and payment_ui["effects"] == 0 and "Nunito" in payment_ui["font"] and not payment_ui["overflow"], "Payments UI leaked public styles or secret controls: " + json.dumps(payment_ui))
+        capture_screenshot(cdp, f"shop-g2-payments-{width}.png")
+        for provider in initial_provider_settings:
+            cdp.evaluate(f"document.querySelector('[data-configure-payment-provider=\"{provider['key']}\"]').click()")
+            editor = cdp.evaluate("""(() => { const f=document.querySelector('#payment-provider-form'); return {
+                open:!document.querySelector('[data-payment-editor]').hidden,provider:f.elements.provider.value,
+                enabled:f.elements.enabled.value,mode:f.elements.mode.value,
+                focused:document.activeElement===f.elements.enabled,
+                controlVisible:f.elements.enabled.getBoundingClientRect().top>=0 && f.elements.enabled.getBoundingClientRect().bottom<=innerHeight,
+                fields:[...f.elements].filter(n=>n.name).map(n=>n.name),
+                overflow:document.documentElement.scrollWidth>innerWidth}; })()""")
+            expect(editor == {"open": True, "provider": provider["key"], "enabled": "1" if provider["enabled"] else "0", "mode": provider["mode"], "focused": True, "controlVisible": True, "fields": ["provider", "enabled", "mode"], "overflow": False}, "Provider editor was incorrect: " + json.dumps(editor))
+            capture_screenshot(cdp, f"shop-g2-configure-{provider['key']}-{width}.png")
+            cdp.evaluate("document.querySelector('[data-payment-editor-close]').click()")
+            expect(cdp.evaluate("document.querySelector('[data-payment-editor]').hidden && document.activeElement.matches('[data-configure-payment-provider]')"), "Close did not return focus to Configure")
+        checks += 5
+    provider_settings_restore_required = True
+    cdp.evaluate("document.querySelector('[data-configure-payment-provider=\"paypal\"]').click(); const f=document.querySelector('#payment-provider-form'); f.elements.enabled.value='1'; f.elements.mode.value='live'; f.requestSubmit()")
+    cdp.wait_for("document.querySelector('[data-payments-message]').textContent.startsWith('Settings saved.') && !document.querySelector('#payment-provider-form [type=submit]').disabled")
+    status, saved_providers = api_request("admin-payment-providers", session_id=session_id)
+    saved_paypal = next(provider for provider in saved_providers["providers"] if provider["key"] == "paypal")
+    expect(status == 200 and saved_paypal["enabled"] and saved_paypal["mode"] == "live" and not saved_paypal["available"], "Admin provider save failed or enabled customer payments")
+    status, discovery = api_request("payment-providers")
+    expect(status == 200 and discovery == {"currency": "USD", "providers": []}, "Public discovery exposed dormant providers")
+    cdp.navigate(BASE + "admin.html")
+    cdp.wait_for("!document.querySelector('#admin-content').hidden && document.querySelectorAll('[data-payment-provider]').length === 2")
+    cdp.evaluate("document.querySelector('[data-admin-module=\"payments\"]').click(); document.querySelector('[data-configure-payment-provider=\"paypal\"]').click()")
+    expect(cdp.evaluate("document.querySelector('#payment-provider-form').elements.mode.value === 'live' && document.querySelector('#payment-provider-form').elements.enabled.value === '1'"), "Payment settings did not persist across reload")
+    restore_provider_settings()
+    provider_settings_restore_required = False
+    cdp.evaluate("document.querySelector('[data-payment-editor-close]').click()")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+    checks += 3
+
     status, theme = api_request("theme")
     expect(status == 200 and theme.get("theme"), "Theme API failed during browser regression")
     cdp.evaluate("document.querySelector('[data-admin-module=\"theme\"]').click()")
@@ -2611,6 +2671,8 @@ try:
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1
 finally:
+    if provider_settings_restore_required:
+        restore_provider_settings()
     if brand_restore_required:
         try:
             restore_brand_identity(initial_brand)

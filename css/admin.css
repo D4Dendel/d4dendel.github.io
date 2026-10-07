@@ -9,6 +9,58 @@
     --cms-radius: 4px;
 }
 
+.cms-app .cms-payment-currency {
+    margin-bottom: 12px;
+    color: var(--cms-text);
+}
+
+.cms-app .cms-payment-provider-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 24px;
+}
+
+.cms-app .cms-payment-provider-card {
+    min-width: 0;
+    padding: 24px;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    background: var(--cms-surface);
+}
+
+.cms-app .cms-payment-provider-card h2 {
+    margin-bottom: 16px;
+    font-size: 1.2rem;
+}
+
+.cms-app .cms-payment-provider-card p {
+    margin-bottom: 10px;
+}
+
+.cms-app .cms-payment-provider-card .cms-button {
+    margin-top: 12px;
+}
+
+.cms-app .cms-payment-editor {
+    margin-top: 24px;
+    max-width: 720px;
+    scroll-margin-top: 82px;
+}
+
+.cms-app [data-payments-message].is-error {
+    color: #9c3434;
+}
+
+@media (max-width: 700px) {
+    .cms-app .cms-payment-provider-grid {
+        grid-template-columns: 1fr;
+    }
+    .cms-app .cms-payment-provider-card {
+        padding: 18px;
+    }
+}
+
 body.cms-app {
     --cms-accent-soft: color-mix(in srgb, var(--cms-accent) 12%, var(--cms-surface));
     min-height: 100vh;

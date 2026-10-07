@@ -356,3 +356,15 @@ CREATE TABLE IF NOT EXISTS shop_payment_events (
         OR (processing_status = 'processed' AND processed_at IS NOT NULL)
     )
 ) ENGINE=InnoDB;
+
+-- Shop G2 safe provider metadata.
+CREATE TABLE IF NOT EXISTS shop_payment_providers (
+    provider VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    enabled TINYINT(1) NOT NULL DEFAULT 0,
+    mode ENUM('test', 'live') NOT NULL DEFAULT 'test',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT chk_shop_payment_providers_key CHECK (provider IN ('paypal','stripe')),
+    CONSTRAINT chk_shop_payment_providers_enabled CHECK (enabled IN (0,1))
+) ENGINE=InnoDB;
+INSERT IGNORE INTO shop_payment_providers (provider) VALUES ('paypal'), ('stripe');

@@ -482,7 +482,8 @@ const loadAdminWorkspace = async () => {
     renderAdminProducts(),
     renderAdminContent(),
     loadAdminTheme(),
-    loadAdminBrand()
+    loadAdminBrand(),
+    loadAdminPaymentProviders()
   ]);
 };
 
@@ -1226,6 +1227,7 @@ document.querySelectorAll('[data-admin-module]').forEach((control) => control.ad
   if (moduleName === 'shop' && adminAuthenticated) renderAdminProducts();
   if (moduleName === 'content' && adminAuthenticated) renderAdminContent();
   if (moduleName === 'brand' && adminAuthenticated) loadAdminBrand();
+  if (moduleName === 'payments' && adminAuthenticated) loadAdminPaymentProviders();
 }));
 document.querySelector('[data-cancel-project]')?.addEventListener('click', () => {
   projectForm?.reset();
@@ -3148,6 +3150,108 @@ const loadPublicBrand = async () => {
     applyPublicBrand(defaultBrandIdentity);
   }
 };
+
+const paymentProviderList = document.querySelector('[data-payment-providers]');
+const paymentProviderForm = document.getElementById('payment-provider-form');
+const paymentProviderEditor = document.querySelector('[data-payment-editor]');
+const paymentsMessage = document.querySelector('[data-payments-message]');
+let adminPaymentProviders = [];
+let paymentProviderCsrf = '';
+
+const setPaymentsMessage = (message, error = false) => {
+  if (!paymentsMessage) return;
+  paymentsMessage.textContent = message;
+  paymentsMessage.classList.toggle('is-error', error);
+};
+
+const showPaymentProviderEditor = (provider) => {
+  if (!paymentProviderForm || !paymentProviderEditor) return;
+  paymentProviderForm.elements.provider.value = provider.key;
+  paymentProviderForm.elements.enabled.value = provider.enabled ? '1' : '0';
+  paymentProviderForm.elements.mode.value = provider.mode;
+  document.getElementById('payment-provider-editor-title').textContent = `Configure ${provider.displayName}`;
+  document.querySelector('[data-payment-server-status]').textContent = provider.configured
+    ? 'Server credentials configured' : 'Server credentials not configured';
+  paymentProviderEditor.hidden = false;
+  if (paymentProviderForm.elements.enabled.getBoundingClientRect().bottom > window.innerHeight) {
+    paymentProviderEditor.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }
+  paymentProviderForm.elements.enabled.focus({ preventScroll: true });
+};
+
+const renderPaymentProviderSettings = () => {
+  if (!paymentProviderList) return;
+  paymentProviderList.replaceChildren(...adminPaymentProviders.map((provider) => {
+    const card = document.createElement('article');
+    card.className = 'cms-payment-provider-card';
+    card.dataset.paymentProvider = provider.key;
+    const title = document.createElement('h2');
+    title.textContent = provider.displayName;
+    const status = document.createElement('p');
+    status.textContent = `Status: ${provider.status}`;
+    const mode = document.createElement('p');
+    mode.textContent = `Mode: ${provider.mode === 'live' ? 'Live' : 'Test'}`;
+    const activation = document.createElement('p');
+    activation.className = 'cms-note';
+    activation.textContent = `Enabled setting: ${provider.enabled ? 'On' : 'Off'}`;
+    const credentials = document.createElement('p');
+    credentials.className = 'cms-note';
+    credentials.textContent = provider.configured ? 'Server credentials configured' : 'Server credentials not configured';
+    const configure = document.createElement('button');
+    configure.type = 'button';
+    configure.className = 'cms-button';
+    configure.dataset.configurePaymentProvider = provider.key;
+    configure.textContent = 'Configure';
+    configure.setAttribute('aria-label', `Configure ${provider.displayName}`);
+    configure.addEventListener('click', () => showPaymentProviderEditor(provider));
+    card.append(title, status, mode, activation, credentials, configure);
+    return card;
+  }));
+};
+
+const loadAdminPaymentProviders = async () => {
+  if (!paymentProviderList || !useCmsApi || !adminAuthenticated) return;
+  try {
+    const result = await cmsRequest('admin-payment-providers');
+    adminPaymentProviders = result.providers;
+    paymentProviderCsrf = result.csrfToken;
+    renderPaymentProviderSettings();
+    setPaymentsMessage('Provider settings loaded.');
+  } catch (error) {
+    paymentProviderCsrf = '';
+    setPaymentsMessage(error.message, true);
+  }
+};
+
+document.querySelector('[data-payment-editor-close]')?.addEventListener('click', () => {
+  const provider = paymentProviderForm.elements.provider.value;
+  paymentProviderEditor.hidden = true;
+  paymentProviderList.querySelector(`[data-configure-payment-provider="${provider}"]`)?.focus();
+});
+
+paymentProviderForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!adminAuthenticated || !paymentProviderCsrf) {
+    setPaymentsMessage('Sign in and reload Payments before saving.', true);
+    return;
+  }
+  const submit = paymentProviderForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    const payload = new FormData(paymentProviderForm);
+    payload.set('csrfToken', paymentProviderCsrf);
+    const result = await cmsRequest('save-payment-provider', { method: 'POST', body: payload });
+    adminPaymentProviders = adminPaymentProviders.map((provider) => provider.key === result.provider.key ? result.provider : provider);
+    renderPaymentProviderSettings();
+    document.querySelector('[data-payment-server-status]').textContent = result.provider.configured
+      ? 'Server credentials configured' : 'Server credentials not configured';
+    setPaymentsMessage('Settings saved. Customer payments remain off while integrations are pending.');
+  } catch (error) {
+    setPaymentsMessage(error.message, true);
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 const brandForm = document.getElementById('brand-form');
 const brandMessage = document.querySelector('[data-brand-message]');
