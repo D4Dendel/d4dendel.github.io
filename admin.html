@@ -42,7 +42,7 @@
                     <button type="button" data-admin-module="content">Content</button>
                     <button type="button" data-admin-module="shop">Shop</button>
                     <button type="button" data-admin-module="theme">Theme</button>
-                    <button type="button" data-admin-module="settings">Settings</button>
+                    <button type="button" data-admin-module="brand">Brand Identity</button>
                 </nav>
                 <button type="button" class="cms-logout" id="admin-logout">Log out</button>
             </aside>
@@ -271,16 +271,59 @@
                     </div>
                 </section>
 
-                <section class="cms-module" data-admin-module-panel="settings" hidden>
-                    <div class="cms-page-heading"><div><span class="cms-kicker">Configuration</span><h1>Settings</h1></div></div>
-                    <section class="cms-editor">
-                        <div class="cms-section-heading"><h2>Social links</h2></div>
-                        <form id="social-form" class="cms-form cms-settings-form">
-                            <label><span>Instagram</span><input type="url" name="instagram" placeholder="https://instagram.com/yourhandle"></label>
-                            <label><span>Facebook</span><input type="url" name="facebook" placeholder="https://facebook.com/yourpage"></label>
-                            <label><span>Twitter</span><input type="url" name="twitter" placeholder="https://twitter.com/yourhandle"></label>
-                            <label><span>YouTube</span><input type="url" name="youtube" placeholder="https://youtube.com/@yourchannel"></label>
-                            <button type="submit" class="cms-button cms-button-primary">Save links</button>
+                <section class="cms-module" data-admin-module-panel="brand" hidden>
+                    <div class="cms-page-heading"><div><span class="cms-kicker">Global identity</span><h1>Brand Identity</h1><p>Manage the public name, media, typography, and social profiles from one place.</p></div></div>
+                    <section class="cms-editor cms-brand-editor">
+                        <form id="brand-form" class="cms-form" enctype="multipart/form-data">
+                            <section class="cms-brand-section" aria-labelledby="brand-identity-heading">
+                                <div class="cms-section-heading"><div><span class="cms-kicker">Identity</span><h2 id="brand-identity-heading">Brand Identity</h2></div></div>
+                                <div class="cms-brand-fields">
+                                    <label><span>Brand Name</span><input type="text" name="brandName" maxlength="120" value="Dyndel Pino" required></label>
+                                    <div class="cms-theme-color"><span id="brand-name-color-label">Brand Name Color</span><div class="cms-theme-color-inputs"><input type="color" name="brandNameColor" value="#f3a889" aria-labelledby="brand-name-color-label"><input type="text" data-brand-color-hex value="#F3A889" aria-label="Brand Name Color HEX value" spellcheck="false" autocomplete="off"></div><small>Applied to public brand text with an automatic contrast-safe header fallback.</small></div>
+                                </div>
+                                <div class="cms-brand-media-grid">
+                                    <fieldset class="cms-brand-media-card">
+                                        <legend>Site Logo</legend>
+                                        <div class="cms-brand-preview cms-brand-logo-preview" data-brand-logo-preview><img src="img/icon.png" alt="Current site logo"><strong data-brand-text-preview>Dyndel Pino</strong></div>
+                                        <label><span>Upload or replace</span><input type="file" name="logoFile" accept="image/jpeg,image/png,image/gif,image/webp"><small>JPG, PNG, GIF, or WebP; maximum 4MB and 4096px.</small></label>
+                                        <label class="cms-check"><input type="checkbox" name="textLogoOnly" value="1"><span>Use the Brand Name without an image logo</span></label>
+                                    </fieldset>
+                                    <fieldset class="cms-brand-media-card">
+                                        <legend>Site Icon / Favicon</legend>
+                                        <div class="cms-brand-preview cms-brand-icon-preview"><img src="img/icon.png" alt="Current site icon" data-brand-icon-preview></div>
+                                        <label><span>Upload or replace</span><input type="file" name="iconFile" accept="image/jpeg,image/png,image/gif,image/webp"><small>Square PNG or WebP recommended; maximum 1MB and 1024px.</small></label>
+                                    </fieldset>
+                                </div>
+                            </section>
+
+                            <section class="cms-brand-section" aria-labelledby="brand-typography-heading">
+                                <div class="cms-section-heading"><div><span class="cms-kicker">Type system</span><h2 id="brand-typography-heading">Typography</h2></div><p>Curated installed and system fonts only.</p></div>
+                                <div class="cms-brand-font-grid">
+                                    <label><span>Brand Font</span><select name="brandFont"><option value="patrick-hand">Patrick Hand</option><option value="nunito">Nunito</option><option value="georgia">Georgia</option><option value="system-sans">System Sans</option></select></label>
+                                    <label><span>Heading Font</span><select name="headingFont"><option value="patrick-hand">Patrick Hand</option><option value="nunito">Nunito</option><option value="georgia">Georgia</option><option value="system-sans">System Sans</option></select></label>
+                                    <label><span>Body Font</span><select name="bodyFont"><option value="nunito">Nunito</option><option value="patrick-hand">Patrick Hand</option><option value="georgia">Georgia</option><option value="system-sans">System Sans</option></select></label>
+                                    <label><span>UI Font</span><select name="uiFont"><option value="same-body">Same as Body</option><option value="nunito">Nunito</option><option value="georgia">Georgia</option><option value="system-sans">System Sans</option></select></label>
+                                </div>
+                            </section>
+
+                            <section class="cms-brand-section" aria-labelledby="brand-effects-heading">
+                                <div class="cms-section-heading"><div><span class="cms-kicker">Public interaction</span><h2 id="brand-effects-heading">Pointer Brush Effect</h2></div><p>Controls the decorative pointer trail across public pages.</p></div>
+                                <div class="cms-brand-fields">
+                                    <label><span>Pointer Brush Effect</span><select name="pointerBrushEnabled"><option value="1">On</option><option value="0">Off</option></select><small>Reduced-motion preferences and mobile behavior remain respected when enabled.</small></label>
+                                </div>
+                            </section>
+
+                            <section class="cms-brand-section" aria-labelledby="brand-social-heading">
+                                <div class="cms-section-heading"><div><span class="cms-kicker">Public footer</span><h2 id="brand-social-heading">Follow Links</h2></div><p>Blank profiles remain hidden; no placeholder links are published.</p></div>
+                                <div class="cms-brand-font-grid">
+                                    <label><span>Instagram</span><input type="url" name="instagram" placeholder="https://instagram.com/yourhandle"></label>
+                                    <label><span>Facebook</span><input type="url" name="facebook" placeholder="https://facebook.com/yourpage"></label>
+                                    <label><span>Twitter / X</span><input type="url" name="twitter" placeholder="https://twitter.com/yourhandle"></label>
+                                    <label><span>YouTube</span><input type="url" name="youtube" placeholder="https://youtube.com/@yourchannel"></label>
+                                </div>
+                            </section>
+                            <div class="admin-form-actions"><button type="submit" class="cms-button cms-button-primary" data-brand-save>Save Brand Settings</button></div>
+                            <p class="cms-note cms-brand-message" data-brand-message role="status">Loading Brand Identity…</p>
                         </form>
                     </section>
                 </section>

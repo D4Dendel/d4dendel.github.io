@@ -11,6 +11,15 @@
     --blue-deep: #c86f52;
     --line: rgba(61, 41, 37, 0.11);
     --shadow: 0 24px 60px rgba(170, 102, 75, 0.16);
+    --font-brand: "Patrick Hand", cursive;
+    --font-heading: "Patrick Hand", cursive;
+    --font-body: "Nunito", Arial, sans-serif;
+    --font-ui: "Nunito", Arial, sans-serif;
+    --brand-name-color: #f3a889;
+    --brand-name-color-header: #f3a889;
+    --header-bg: #2b1d1a;
+    --header-fg: #ffffff;
+    --header-accent: #f3a889;
 }
 
 * {
@@ -24,7 +33,7 @@ html {
 }
 
 body {
-    font-family: "Nunito", Arial, sans-serif;
+    font-family: var(--font-body);
     background:
         radial-gradient(circle at top left, color-mix(in srgb, var(--blue-deep) 32%, transparent), transparent 18%),
         radial-gradient(circle at right bottom, color-mix(in srgb, var(--blue-deep) 62%, transparent), transparent 22%),
@@ -91,13 +100,30 @@ a {
     font: inherit;
 }
 
+body:not([data-page="admin"]) h1,
+body:not([data-page="admin"]) h2 {
+    font-family: var(--font-heading);
+}
+
+body:not([data-page="admin"]) button,
+body:not([data-page="admin"]) input,
+body:not([data-page="admin"]) select,
+body:not([data-page="admin"]) textarea,
+body:not([data-page="admin"]) label,
+body:not([data-page="admin"]) .nav,
+body:not([data-page="admin"]) .eyebrow,
+body:not([data-page="admin"]) .btn {
+    font-family: var(--font-ui);
+}
+
 .header {
-    background: var(--surface-translucent);
-    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--header-bg) 94%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--header-fg) 18%, transparent);
+    color: var(--header-fg);
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(14px);
     transition: background-color 180ms ease, box-shadow 180ms ease;
 }
 
@@ -116,7 +142,11 @@ a {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-width: 220px;
+    min-width: min(240px, 32vw);
+}
+
+.logo-wrap[aria-label] {
+    text-decoration: none;
 }
 
 .logo-wrap img {
@@ -130,13 +160,9 @@ a {
     font-size: clamp(1.6rem, 2vw, 2.2rem);
     font-weight: 700;
     letter-spacing: 0.04em;
-    color: var(--text);
-    font-family: "Patrick Hand", cursive;
+    color: var(--brand-name-color-header);
+    font-family: var(--font-brand);
     transition: font-size 180ms ease;
-}
-
-.brand span {
-    color: var(--blue-deep);
 }
 
 .nav {
@@ -153,7 +179,7 @@ a {
 .nav a,
 .nav-works-toggle {
     text-decoration: none;
-    color: var(--text);
+    color: var(--header-fg);
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.12em;
@@ -166,7 +192,7 @@ a {
 .nav a:focus,
 .nav-works-toggle:hover,
 .nav-works-toggle:focus {
-    color: var(--blue-deep);
+    color: var(--header-accent);
     opacity: 1;
 }
 
@@ -204,6 +230,11 @@ a {
     visibility: hidden;
     transform: translate(-50%, -6px);
     transition: opacity 160ms ease, transform 160ms ease;
+    color: var(--text);
+}
+
+.nav-submenu a {
+    color: var(--text);
 }
 
 .nav-submenu a {
@@ -231,7 +262,7 @@ a {
 .nav-works-toggle:focus-visible,
 .nav a:focus-visible {
     border-radius: 4px;
-    outline: 2px solid var(--blue-deep);
+    outline: 2px solid var(--header-accent);
     outline-offset: 4px;
 }
 
@@ -265,9 +296,9 @@ a {
     gap: 5px;
     width: 44px;
     height: 44px;
-    border: 1px solid var(--line);
+    border: 1px solid color-mix(in srgb, var(--header-fg) 28%, transparent);
     border-radius: 12px;
-    background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
+    background: color-mix(in srgb, var(--header-fg) 10%, transparent);
     cursor: pointer;
 }
 
@@ -275,7 +306,7 @@ a {
     display: block;
     width: 20px;
     height: 2px;
-    background: var(--text);
+    background: var(--header-fg);
     margin: 0 auto;
     border-radius: 999px;
     transition: all 0.25s ease;
@@ -315,7 +346,7 @@ a {
 }
 
 .hero h1 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(3rem, 5vw, 5.1rem);
     line-height: 0.98;
     letter-spacing: 0.02em;
@@ -652,7 +683,7 @@ a {
 
 .section-heading h2,
 .about-panel h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.1rem, 3.2vw, 3.2rem);
     line-height: 1.02;
     letter-spacing: 0.02em;
@@ -720,7 +751,7 @@ a {
 .gallery-copy h3 {
     font-size: 1.9rem;
     margin-bottom: 8px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-weight: 400;
 }
 
@@ -827,7 +858,7 @@ a {
 
 .art-modal-copy h2 {
     margin-bottom: 12px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2rem, 4vw, 3.2rem);
     font-weight: 400;
     line-height: 1;
@@ -978,7 +1009,7 @@ body.modal-is-open {
 }
 
 .tile-overlay h3 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 2rem;
     line-height: 1;
     font-weight: 400;
@@ -1055,7 +1086,7 @@ body.modal-is-open {
 }
 
 .admin-header h1 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.8rem, 5vw, 4.4rem);
     line-height: 1;
     letter-spacing: 0.02em;
@@ -1078,7 +1109,7 @@ body.modal-is-open {
 }
 
 .admin-panel h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 2.2rem;
     font-weight: 400;
     margin-bottom: 18px;
@@ -1145,7 +1176,7 @@ body.modal-is-open {
 }
 
 .project-item h3 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 1.8rem;
     margin-bottom: 6px;
     font-weight: 400;
@@ -1242,7 +1273,7 @@ body.modal-is-open {
 }
 
 .category-hero h1 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.35rem, 4vw, 3.8rem);
     line-height: 1.04;
     letter-spacing: 0.02em;
@@ -1287,7 +1318,7 @@ body.modal-is-open {
 }
 
 .illustration-panel-heading h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(1.9rem, 3vw, 2.8rem);
     line-height: 1;
     font-weight: 400;
@@ -1401,7 +1432,7 @@ body.modal-is-open {
 }
 
 .logo-project-heading h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(1.9rem, 3vw, 2.8rem);
     line-height: 1;
     font-weight: 400;
@@ -1515,7 +1546,7 @@ body.modal-is-open {
 }
 
 .brand-kit-hero-copy h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.8rem, 5vw, 4.8rem);
     line-height: 0.85;
     font-weight: 400;
@@ -1609,7 +1640,7 @@ body.modal-is-open {
 
 .brand-kit-intro h2 {
     margin: 10px 0 14px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(1.9rem, 3vw, 2.8rem);
     line-height: 1;
     font-weight: 400;
@@ -1823,7 +1854,7 @@ body.modal-is-open {
 .about-copy .about-intro {
     margin-top: 0;
     color: var(--text);
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 2rem;
     line-height: 1.1;
 }
@@ -2018,10 +2049,10 @@ body.modal-is-open {
     width: 82px;
     min-height: 36px;
     padding: 7px 8px;
-    border: 1px solid var(--line);
+    border: 1px solid color-mix(in srgb, var(--header-fg) 28%, transparent);
     border-radius: 999px;
-    background: color-mix(in srgb, var(--panel-strong) 82%, transparent);
-    color: var(--text);
+    background: color-mix(in srgb, var(--header-fg) 10%, transparent);
+    color: var(--header-fg);
     font-size: 0.76rem;
     font-weight: 800;
     letter-spacing: 0.06em;
@@ -2070,8 +2101,8 @@ body.modal-is-open {
 }
 
 .shop-page .header {
-    background: var(--panel);
-    border-color: var(--shop-orange-line);
+    background: color-mix(in srgb, var(--header-bg) 94%, transparent);
+    border-color: color-mix(in srgb, var(--header-fg) 18%, transparent);
 }
 
 
@@ -2119,19 +2150,22 @@ body.modal-is-open {
 
 .shop-collection > h2 {
     margin: 0;
-    font-size: clamp(1rem, 1.3vw, 1.2rem);
-    letter-spacing: 0.16em;
+    font-size: clamp(1.45rem, 2.2vw, 2rem);
+    font-weight: 400;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 
 .shop-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: clamp(22px, 3vw, 38px) clamp(16px, 2.3vw, 30px);
     align-items: start;
 }
 
 .shop-product {
+    flex: 0 1 calc((100% - (3 * clamp(16px, 2.3vw, 30px))) / 4);
     min-width: 0;
     border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
     border-radius: 14px;
@@ -2294,7 +2328,7 @@ body.modal-is-open {
 .shop-product-detail {
     display: grid;
     grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
-    gap: clamp(34px, 6vw, 82px);
+    gap: clamp(38px, 6vw, 82px);
     align-items: start;
 }
 
@@ -2310,9 +2344,9 @@ body.modal-is-open {
     overflow: hidden;
     place-items: center;
     border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
-    border-radius: 18px;
+    border-radius: 22px;
     background: color-mix(in srgb, var(--panel-strong) 90%, transparent);
-    box-shadow: 0 18px 46px color-mix(in srgb, var(--text) 8%, transparent);
+    box-shadow: 0 22px 58px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .shop-product-main-image {
@@ -2337,7 +2371,7 @@ body.modal-is-open {
     overflow: hidden;
     padding: 0;
     border: 2px solid transparent;
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--panel-strong);
     cursor: pointer;
     opacity: 0.72;
@@ -2363,7 +2397,7 @@ body.modal-is-open {
 .shop-product-information {
     display: grid;
     justify-items: start;
-    gap: 18px;
+    gap: 20px;
     min-width: 0;
     padding-top: 4px;
 }
@@ -2396,7 +2430,7 @@ body.modal-is-open {
 .shop-product-state h1 {
     margin: 0;
     max-width: 100%;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.45rem, 4vw, 4rem);
     font-weight: 400;
     line-height: 0.98;
@@ -2409,7 +2443,7 @@ body.modal-is-open {
     flex-wrap: wrap;
     gap: 10px;
     margin: 0;
-    font-size: clamp(1.2rem, 2vw, 1.55rem);
+    font-size: clamp(1.35rem, 2vw, 1.7rem);
     font-variant-numeric: tabular-nums;
 }
 
@@ -2434,8 +2468,9 @@ body.modal-is-open {
     display: grid;
     justify-items: start;
     gap: 12px;
-    width: min(100%, 360px);
-    padding-top: 6px;
+    width: min(100%, 380px);
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
 }
 
 .shop-product-availability {
@@ -2443,7 +2478,7 @@ body.modal-is-open {
     color: var(--muted);
     font-size: 0.82rem;
     font-weight: 800;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
 }
 
@@ -2467,7 +2502,7 @@ body.modal-is-open {
     width: 100%;
     padding: 12px 14px;
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: 12px;
     background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
     color: var(--text);
     font-size: 0.86rem;
@@ -2758,7 +2793,7 @@ body > .shop-cart-layer {
 
 .shop-empty-cart p:first-child {
     color: var(--text);
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 1.8rem;
 }
 
@@ -2892,7 +2927,7 @@ body.is-cart-open {
 .checkout-handoff h2 {
     margin: 0 0 24px;
     padding: 0;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     color: var(--text);
     font-size: clamp(1.8rem, 2.8vw, 2.35rem);
     font-weight: 400;
@@ -3275,7 +3310,7 @@ body.is-cart-open {
 
 .home-content-card h3 {
     margin-top: 6px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 1.65rem;
     font-weight: 400;
     line-height: 1.25;
@@ -3334,7 +3369,9 @@ body.is-cart-open {
 }
 
 @media (max-width: 900px) {
-    .shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .shop-product {
+        flex-basis: calc((100% - (2 * clamp(16px, 2.3vw, 30px))) / 3);
+    }
 
     .shop-product-detail {
         gap: 34px;
@@ -3377,8 +3414,11 @@ body.is-cart-open {
     }
 
     .shop-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 28px 14px;
+    }
+
+    .shop-product {
+        flex-basis: calc((100% - 14px) / 2);
     }
 
     .shop-product-copy {
@@ -3484,8 +3524,8 @@ body.is-cart-open {
 }
 
 @media (max-width: 350px) {
-    .shop-grid {
-        grid-template-columns: 1fr;
+    .shop-product {
+        flex-basis: 100%;
     }
 }
 
@@ -3523,7 +3563,7 @@ body.is-cart-open {
 
 .contact-panel h3 {
     font-size: clamp(2.2rem, 3vw, 3.2rem);
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     margin: 6px 0 18px;
     font-weight: 400;
 }
@@ -3672,39 +3712,102 @@ body.is-cart-open {
 }
 
 .footer {
-    min-height: 110px;
-    background: #151412;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    color: #f5f5f5;
-    font-size: 0.95rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 20px 30px;
+    background: var(--header-bg);
+    color: var(--header-fg);
+    padding: clamp(34px, 5vw, 58px) 30px 24px;
 }
 
 .footer-inner {
     display: grid;
-    justify-items: center;
-    gap: 12px;
-    width: min(1120px, 100%);
+    grid-template-columns: minmax(220px, 1.1fr) minmax(0, 2fr);
+    gap: 32px clamp(40px, 7vw, 92px);
+    width: min(1160px, 100%);
+    margin-inline: auto;
+}
+
+.footer-identity {
+    align-self: start;
+}
+
+.footer-brand-name {
+    display: block;
+    margin-bottom: 9px;
+    color: var(--brand-name-color-header);
+    font-family: var(--font-brand);
+    font-size: clamp(1.75rem, 2.7vw, 2.35rem);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1;
+}
+
+.footer-identity p {
+    max-width: 34ch;
+    color: color-mix(in srgb, var(--header-fg) 68%, transparent);
+    font-size: 0.86rem;
+    line-height: 1.65;
+}
+
+.footer-groups {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 26px;
+}
+
+.footer-group h2 {
+    margin-bottom: 12px;
+    color: var(--header-fg);
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+}
+
+.footer-group nav {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+}
+
+.footer-group a {
+    color: color-mix(in srgb, var(--header-fg) 76%, transparent);
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    text-transform: none;
 }
 
 .footer-policy-nav {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px 18px;
-    color: color-mix(in srgb, #f5f5f5 78%, transparent);
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
+    display: grid;
 }
 
 .footer-policy-nav a {
-    white-space: nowrap;
+    white-space: normal;
     text-underline-offset: 3px;
+}
+
+.footer-social-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-social-link img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+}
+
+.footer-copyright {
+    grid-column: 1 / -1;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--header-fg) 16%, transparent);
+    color: color-mix(in srgb, var(--header-fg) 56%, transparent);
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 body:not([data-page="admin"]) > main.policy-shell {
@@ -3798,7 +3901,7 @@ body:not([data-page="admin"]) > main.policy-shell {
 
 .policy-content h2 {
     margin-bottom: 15px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(1.75rem, 3vw, 2.25rem);
     font-weight: 400;
     line-height: 1.1;
@@ -3846,7 +3949,7 @@ body:not([data-page="admin"]) > main.policy-shell {
     background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
     body:not([data-page="admin"]) > main.policy-shell {
         width: min(100% - 32px, 1120px);
         padding-top: 38px;
@@ -3879,6 +3982,19 @@ body:not([data-page="admin"]) > main.policy-shell {
     .footer {
         padding-inline: 20px;
     }
+
+    .footer-inner {
+        grid-template-columns: 1fr;
+        gap: 28px;
+    }
+
+    .footer-groups {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .footer-copyright {
+        grid-column: 1;
+    }
 }
 
 .footer a {
@@ -3886,7 +4002,9 @@ body:not([data-page="admin"]) > main.policy-shell {
 }
 
 .footer a:hover {
+    color: var(--header-fg);
     text-decoration: underline;
+    text-underline-offset: 4px;
 }
 
 .footer a:focus-visible {
@@ -3957,7 +4075,7 @@ body:not([data-page="admin"]) > main.policy-shell {
     }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
     /* The single-column illustration main is too tall for the 12% reveal threshold. */
     .illustration-page.reveal {
         opacity: 1;
@@ -4066,6 +4184,7 @@ body:not([data-page="admin"]) > main.policy-shell {
         isolation: isolate;
         max-height: calc(100vh - 92px);
         overflow-y: auto;
+        color: var(--text);
     }
 
     .nav.open {
@@ -4094,6 +4213,7 @@ body:not([data-page="admin"]) > main.policy-shell {
         min-height: 42px;
         align-items: center;
         font-size: 0.72rem;
+        color: var(--text);
     }
 
     .nav-works-toggle {
@@ -4123,6 +4243,16 @@ body:not([data-page="admin"]) > main.policy-shell {
 
     .nav-submenu a {
         padding: 7px 12px;
+    }
+
+    .nav a:hover,
+    .nav a:focus,
+    .nav-works-toggle:hover,
+    .nav-works-toggle:focus,
+    .nav a[aria-current="page"],
+    .nav a[aria-current="location"],
+    .nav-works-toggle[aria-current="page"] {
+        color: var(--blue-deep);
     }
 
     .header.is-compact .nav-container {
@@ -4384,7 +4514,7 @@ body:not([data-page="admin"]) > main.policy-shell {
     right: 12px;
     bottom: 9px;
     color: rgba(61, 41, 37, 0.42);
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 1.1rem;
     pointer-events: none;
 }
@@ -4571,7 +4701,7 @@ body:not([data-page="admin"]) > main.policy-shell {
 
 .admin-section-toolbar h2 {
     margin-bottom: 4px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 2.2rem;
     font-weight: 400;
 }
@@ -4732,7 +4862,7 @@ body:not([data-page="admin"]) > main.policy-shell {
 
 .stories-heading h1 {
     margin-bottom: 12px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(3.4rem, 6vw, 5rem);
     font-weight: 400;
     line-height: 1.08;
@@ -4832,7 +4962,7 @@ body:not([data-page="admin"]) > main.policy-shell {
 }
 
 .story-copy h2 {
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 1.9rem;
     font-weight: 400;
     line-height: 1.2;
@@ -4884,7 +5014,7 @@ body[data-page="story"] .menu-toggle:focus-visible {
 
 .stories-state h2 {
     margin-bottom: 10px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: 2rem;
     font-weight: 400;
 }
@@ -4914,6 +5044,18 @@ body[data-page="stories"] .menu-toggle:focus-visible {
     opacity: 1;
     text-decoration: underline;
     text-underline-offset: 6px;
+}
+
+@media (min-width: 901px) {
+    .header .nav-list > li > a[aria-current="page"],
+    .header .nav-list > li > a[aria-current="location"],
+    .header .nav-list > li > .nav-works-toggle[aria-current="page"] {
+        color: var(--header-accent);
+    }
+
+    .header .nav-submenu a[aria-current="page"] {
+        color: var(--blue-deep);
+    }
 }
 
 @media (max-width: 900px) {
@@ -4950,7 +5092,7 @@ body[data-page="stories"] .menu-toggle:focus-visible {
 
 .article-heading h1 {
     margin: 20px 0 18px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.6rem, 5vw, 4.5rem);
     font-weight: 400;
     line-height: 1.08;
@@ -4994,7 +5136,7 @@ body[data-page="stories"] .menu-toggle:focus-visible {
 .article-body h2,
 .article-body h3 {
     margin-top: 38px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-weight: 400;
     line-height: 1.25;
 }
@@ -5070,7 +5212,7 @@ body[data-page="stories"] .menu-toggle:focus-visible {
 
 .article-error h1 {
     margin-bottom: 16px;
-    font-family: "Patrick Hand", cursive;
+    font-family: var(--font-heading);
     font-size: clamp(2.4rem, 5vw, 3.5rem);
     font-weight: 400;
     line-height: 1.15;

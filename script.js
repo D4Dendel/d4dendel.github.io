@@ -1,3 +1,35 @@
+const hexLuminance = (hex) => {
+  if (!/^#[\da-f]{6}$/i.test(hex || '')) return null;
+  const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+    .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+};
+
+const colorContrast = (first, second) => {
+  const values = [hexLuminance(first), hexLuminance(second)];
+  if (values.some((value) => value === null)) return 0;
+  const [light, dark] = values.sort((left, right) => right - left);
+  return (light + 0.05) / (dark + 0.05);
+};
+
+const syncPublicSurfaceContrast = () => {
+  if (document.body.dataset.page === 'admin') return;
+  const root = document.documentElement;
+  const styles = getComputedStyle(root);
+  const themeColors = ['--text', '--bg', '--panel-strong'].map((token) => styles.getPropertyValue(token).trim().toLowerCase());
+  const headerBackground = themeColors.reduce((darkest, color) => {
+    const luminance = hexLuminance(color);
+    return luminance !== null && luminance < darkest.luminance ? { color, luminance } : darkest;
+  }, { color: '#151412', luminance: 1 }).color;
+  const headerForeground = colorContrast(headerBackground, '#ffffff') >= colorContrast(headerBackground, '#000000') ? '#ffffff' : '#000000';
+  const brandColor = styles.getPropertyValue('--brand-name-color').trim().toLowerCase();
+  const accent = styles.getPropertyValue('--blue-deep').trim().toLowerCase();
+  root.style.setProperty('--header-bg', headerBackground);
+  root.style.setProperty('--header-fg', headerForeground);
+  root.style.setProperty('--brand-name-color-header', colorContrast(headerBackground, brandColor) >= 4.5 ? brandColor : headerForeground);
+  root.style.setProperty('--header-accent', colorContrast(headerBackground, accent) >= 3 ? accent : headerForeground);
+};
+
 const syncPublicButtonContrast = () => {
   if (document.body.dataset.page === 'admin') return;
   const styles = getComputedStyle(document.documentElement);
@@ -9,6 +41,7 @@ const syncPublicButtonContrast = () => {
     const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
     document.body.style.setProperty(foreground, (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? '#000000' : '#ffffff');
   });
+  syncPublicSurfaceContrast();
 };
 syncPublicButtonContrast();
 
@@ -19,27 +52,11 @@ const worksItem = nav?.querySelector('.nav-works');
 const worksToggle = nav?.querySelector('[data-works-toggle]');
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const isMobileViewport = window.matchMedia('(max-width: 760px)').matches;
-const mobileNavigation = window.matchMedia('(max-width: 760px)');
+const isMobileViewport = window.matchMedia('(max-width: 900px)').matches;
+const mobileNavigation = window.matchMedia('(max-width: 900px)');
 
 // Public personalization creates no floating elements or listeners inside the CMS.
 if (document.body.dataset.page !== 'admin') {
-  const pointerCanvas = document.createElement('canvas');
-  pointerCanvas.className = 'pointer-canvas';
-  pointerCanvas.setAttribute('aria-hidden', 'true');
-  document.body.prepend(pointerCanvas);
-
-  const canvasContext = pointerCanvas.getContext('2d');
-  let canvasScale = 1;
-  let lastPointerPosition = null;
-  let trailColor = '200, 111, 82';
-  const syncTrailColor = () => {
-    const accent = getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim();
-    if (/^#[\da-f]{6}$/i.test(accent)) trailColor = [1, 3, 5].map((offset) => parseInt(accent.slice(offset, offset + 2), 16)).join(', ');
-  };
-  syncTrailColor();
-  document.addEventListener('public-theme-applied', syncTrailColor);
-
   let contactMascot = document.querySelector('.contact-mascot');
   if (!contactMascot) {
     contactMascot = document.createElement('img');
@@ -51,6 +68,29 @@ if (document.body.dataset.page !== 'admin') {
   } else {
     document.body.append(contactMascot);
   }
+}
+
+let pointerBrushInitialized = false;
+const initializePointerBrushEffect = () => {
+  if (document.body.dataset.page === 'admin' || pointerBrushInitialized || reducedMotion.matches || isMobileViewport) return;
+  const pointerCanvas = document.createElement('canvas');
+  pointerCanvas.className = 'pointer-canvas';
+  pointerCanvas.setAttribute('aria-hidden', 'true');
+  const canvasContext = pointerCanvas.getContext('2d');
+  if (!canvasContext) return;
+  pointerBrushInitialized = true;
+  document.body.prepend(pointerCanvas);
+
+  let canvasScale = 1;
+  let lastPointerPosition = null;
+  let trailColor = '200, 111, 82';
+  const syncTrailColor = () => {
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim();
+    if (/^#[\da-f]{6}$/i.test(accent)) trailColor = [1, 3, 5].map((offset) => parseInt(accent.slice(offset, offset + 2), 16)).join(', ');
+  };
+  syncTrailColor();
+  document.addEventListener('public-theme-applied', syncTrailColor);
+
   const resizePointerCanvas = () => {
     canvasScale = Math.min(window.devicePixelRatio || 1, 2);
     pointerCanvas.width = Math.floor(window.innerWidth * canvasScale);
@@ -96,34 +136,32 @@ if (document.body.dataset.page !== 'admin') {
     }
   };
 
-  if (canvasContext && !reducedMotion.matches && !isMobileViewport) {
-    resizePointerCanvas();
-    window.addEventListener('resize', resizePointerCanvas);
-    window.addEventListener('pointermove', (event) => {
-      const currentPosition = { x: event.clientX, y: event.clientY };
-      if (lastPointerPosition) {
-        paintBetween(lastPointerPosition, currentPosition, event.pressure || 1);
-      } else {
-        drawBrushStamp(currentPosition.x, currentPosition.y, event.pressure || 1);
-      }
-      lastPointerPosition = currentPosition;
-    });
-    window.addEventListener('pointerout', (event) => {
-      if (!event.relatedTarget) lastPointerPosition = null;
-    });
+  resizePointerCanvas();
+  window.addEventListener('resize', resizePointerCanvas);
+  window.addEventListener('pointermove', (event) => {
+    const currentPosition = { x: event.clientX, y: event.clientY };
+    if (lastPointerPosition) {
+      paintBetween(lastPointerPosition, currentPosition, event.pressure || 1);
+    } else {
+      drawBrushStamp(currentPosition.x, currentPosition.y, event.pressure || 1);
+    }
+    lastPointerPosition = currentPosition;
+  });
+  window.addEventListener('pointerout', (event) => {
+    if (!event.relatedTarget) lastPointerPosition = null;
+  });
 
-    const fadeCanvas = () => {
-      canvasContext.save();
-      canvasContext.globalCompositeOperation = 'destination-out';
-      canvasContext.fillStyle = 'rgba(0, 0, 0, 0.018)';
-      canvasContext.fillRect(0, 0, window.innerWidth, window.innerHeight);
-      canvasContext.restore();
-      window.requestAnimationFrame(fadeCanvas);
-    };
-
+  const fadeCanvas = () => {
+    canvasContext.save();
+    canvasContext.globalCompositeOperation = 'destination-out';
+    canvasContext.fillStyle = 'rgba(0, 0, 0, 0.018)';
+    canvasContext.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    canvasContext.restore();
     window.requestAnimationFrame(fadeCanvas);
-  }
-}
+  };
+
+  window.requestAnimationFrame(fadeCanvas);
+};
 
 // Keep public navigation state centralized for archives, child routes, Store hooks, and fragments.
 if (nav && document.body.dataset.page !== 'admin') {
@@ -221,7 +259,11 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-mobileNavigation.addEventListener?.('change', () => setWorksOpen(false));
+mobileNavigation.addEventListener?.('change', () => {
+  setWorksOpen(false);
+  nav?.classList.remove('open');
+  menuToggle?.setAttribute('aria-expanded', 'false');
+});
 
 if (menuToggle && nav) {
   menuToggle.addEventListener('click', () => {
@@ -351,7 +393,6 @@ document.querySelectorAll('.portrait-gallery .gallery-image').forEach((image, in
 
 const STORAGE_KEYS = {
   projects: 'dyndelProjects',
-  socials: 'dyndelSocials',
   adminSession: 'dyndelAdminSession'
 };
 
@@ -366,13 +407,6 @@ const defaultProjects = [
   { title: 'Northwind', category: 'Illustration', image: 'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?auto=format&fit=crop&w=900&q=80', description: 'A bold illustration series inspired by atmospheric landscapes.', managed: false, showHome: true },
   { title: 'Harbor & Co', category: 'Logos', image: 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=900&q=80', description: 'Simple and warm brand identity design for a coastal lifestyle business.', managed: false, showHome: true }
 ];
-
-const defaultSocials = {
-  instagram: 'https://www.instagram.com/d4dyndel',
-  facebook: 'https://www.facebook.com/d4dyndel',
-  twitter: 'https://twitter.com/d4dyndel',
-  youtube: 'https://www.youtube.com/@d4dyndel'
-};
 
 const getStoredData = (key, fallback) => {
   try {
@@ -394,7 +428,16 @@ const contentTypeLabels = { blog: 'Blog', news: 'News', update: 'Update', announ
 
 const cmsRequest = async (action, options = {}) => {
   const response = await fetch(`${cmsApi}?action=${action}`, options);
-  const data = await response.json();
+  const responseText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch (error) {
+    console.error(`CMS ${action} returned a non-JSON response with HTTP ${response.status}.`);
+    const malformed = new Error('The server returned an unexpected response. Please try again or check the server log.');
+    malformed.status = response.status;
+    throw malformed;
+  }
   if (!response.ok) {
     const error = new Error(data.error || 'CMS request failed.');
     error.status = response.status;
@@ -438,7 +481,8 @@ const loadAdminWorkspace = async () => {
     renderProjectList(),
     renderAdminProducts(),
     renderAdminContent(),
-    loadAdminTheme()
+    loadAdminTheme(),
+    loadAdminBrand()
   ]);
 };
 
@@ -1181,6 +1225,7 @@ document.querySelectorAll('[data-admin-module]').forEach((control) => control.ad
   });
   if (moduleName === 'shop' && adminAuthenticated) renderAdminProducts();
   if (moduleName === 'content' && adminAuthenticated) renderAdminContent();
+  if (moduleName === 'brand' && adminAuthenticated) loadAdminBrand();
 }));
 document.querySelector('[data-cancel-project]')?.addEventListener('click', () => {
   projectForm?.reset();
@@ -1358,17 +1403,6 @@ const renderHomepageGallery = () => {
       observer.observe(element);
     } else {
       element.classList.add('visible');
-    }
-  });
-};
-
-const updateSocialLinks = () => {
-  const socials = getStoredData(STORAGE_KEYS.socials, defaultSocials);
-
-  document.querySelectorAll('[data-social]').forEach((link) => {
-    const key = link.getAttribute('data-social');
-    if (socials[key]) {
-      link.href = socials[key];
     }
   });
 };
@@ -2907,28 +2941,306 @@ const loadPublicTheme = async () => {
   }
 };
 
-const socialForm = document.getElementById('social-form');
-if (socialForm) {
-  socialForm.addEventListener('submit', (event) => {
-    event.preventDefault();
+const publicFontStacks = {
+  'patrick-hand': '"Patrick Hand", cursive',
+  nunito: '"Nunito", Arial, sans-serif',
+  georgia: 'Georgia, "Times New Roman", serif',
+  'system-sans': 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+};
+const defaultBrandIdentity = {
+  brandName: 'Dyndel Pino',
+  logoPath: 'img/icon.png',
+  siteIconPath: 'img/icon.png',
+  brandNameColor: '#f3a889',
+  brandFont: 'patrick-hand',
+  headingFont: 'patrick-hand',
+  bodyFont: 'nunito',
+  uiFont: 'same-body',
+  pointerBrushEnabled: true,
+  socials: {
+    instagram: 'https://www.instagram.com/d4dyndel',
+    facebook: 'https://www.facebook.com/d4dyndel',
+    twitter: 'https://twitter.com/d4dyndel',
+    youtube: 'https://www.youtube.com/@d4dyndel'
+  },
+  updatedAt: null
+};
+let publicBrandIdentity = { ...defaultBrandIdentity, socials: { ...defaultBrandIdentity.socials } };
+const publicSiteRoot = new URL('../', cmsApi);
+const initialDocumentTitle = document.title;
+const initialTitleBrandSuffix = ' | Dyndel Pino';
+const initialTitleBase = initialDocumentTitle.endsWith(initialTitleBrandSuffix)
+  ? initialDocumentTitle.slice(0, -initialTitleBrandSuffix.length)
+  : null;
+const siteAssetUrl = (path) => path ? new URL(path, publicSiteRoot).href : '';
+const safePublicUrl = (value) => {
+  try {
+    const destination = new URL(value);
+    return ['http:', 'https:'].includes(destination.protocol) ? destination.href : '';
+  } catch (error) {
+    return '';
+  }
+};
+const brandDocumentTitle = (pageTitle) => `${pageTitle} | ${publicBrandIdentity.brandName}`;
 
-    const formData = new FormData(socialForm);
-    const socials = {
-      instagram: formData.get('instagram')?.toString().trim() || '',
-      facebook: formData.get('facebook')?.toString().trim() || '',
-      twitter: formData.get('twitter')?.toString().trim() || '',
-      youtube: formData.get('youtube')?.toString().trim() || ''
-    };
-
-    const filteredSocials = Object.fromEntries(
-      Object.entries(socials).filter(([, value]) => value)
-    );
-
-    saveData(STORAGE_KEYS.socials, { ...defaultSocials, ...filteredSocials });
-    updateSocialLinks();
-    socialForm.reset();
+const updatePublicSocialLinks = (socials) => {
+  document.querySelectorAll('[data-social]').forEach((link) => {
+    const destination = safePublicUrl(socials[link.dataset.social] || '');
+    link.hidden = !destination;
+    if (destination) {
+      link.href = destination;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    } else {
+      link.removeAttribute('href');
+    }
   });
-}
+};
+
+const buildPublicFooter = (brand) => {
+  const footer = document.querySelector('.footer');
+  if (!footer || document.body.dataset.page === 'admin') return;
+  const inner = document.createElement('div');
+  inner.className = 'footer-inner';
+
+  const identity = document.createElement('div');
+  identity.className = 'footer-identity';
+  const name = document.createElement('strong');
+  name.className = 'footer-brand-name';
+  name.textContent = brand.brandName;
+  const descriptor = document.createElement('p');
+  descriptor.textContent = 'Illustration, design, and stories from an independent creative studio.';
+  identity.append(name, descriptor);
+
+  const groups = document.createElement('div');
+  groups.className = 'footer-groups';
+  const addGroup = (headingText, links, className = '') => {
+    const group = document.createElement('section');
+    group.className = `footer-group ${className}`.trim();
+    const heading = document.createElement('h2');
+    heading.textContent = headingText;
+    const nav = document.createElement('nav');
+    nav.setAttribute('aria-label', headingText);
+    if (className === 'footer-policy-group') nav.className = 'footer-policy-nav';
+    links.forEach(({ label, href, external, network }) => {
+      const link = document.createElement('a');
+      link.href = href;
+      link.textContent = label;
+      if (external) {
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.setAttribute('aria-label', `${label} (opens in a new tab)`);
+      }
+      if (network) {
+        link.className = 'footer-social-link';
+        const icon = document.createElement('img');
+        icon.src = siteAssetUrl(`img/social/${network}.png`);
+        icon.alt = '';
+        icon.width = 18;
+        icon.height = 18;
+        link.replaceChildren(icon, document.createElement('span'));
+        link.querySelector('span').textContent = label;
+      }
+      nav.append(link);
+    });
+    group.append(heading, nav);
+    groups.append(group);
+  };
+  addGroup('Explore', [
+    { label: 'Home', href: new URL('index.html', publicSiteRoot).href },
+    { label: 'Works', href: new URL('illustration.html', publicSiteRoot).href },
+    { label: 'Stories', href: new URL('stories.php', publicSiteRoot).href },
+    { label: 'Store', href: new URL('store.html', publicSiteRoot).href }
+  ]);
+  addGroup('Policies', [
+    { label: 'Terms', href: new URL('terms.html', publicSiteRoot).href },
+    { label: 'Privacy', href: new URL('privacy.html', publicSiteRoot).href },
+    { label: 'Shipping & Delivery', href: new URL('shipping-delivery.html', publicSiteRoot).href },
+    { label: 'Returns & Refunds', href: new URL('returns-refunds.html', publicSiteRoot).href },
+    { label: 'Digital Products', href: new URL('digital-products.html', publicSiteRoot).href }
+  ], 'footer-policy-group');
+  const socialLinks = Object.entries(brand.socials || {}).flatMap(([network, value]) => {
+    const href = safePublicUrl(value);
+    if (!href || !['instagram', 'facebook', 'twitter', 'youtube'].includes(network)) return [];
+    const label = network === 'twitter' ? 'Twitter / X' : network[0].toUpperCase() + network.slice(1);
+    return [{ label, href, external: true, network }];
+  });
+  if (socialLinks.length) addGroup('Follow', socialLinks, 'footer-follow-group');
+
+  const copyright = document.createElement('p');
+  copyright.className = 'footer-copyright';
+  copyright.textContent = `\u00a9 ${new Date().getFullYear()} ${brand.brandName}`;
+  inner.append(identity, groups, copyright);
+  footer.replaceChildren(inner);
+};
+
+const applyPublicBrand = (incoming) => {
+  if (document.body.dataset.page === 'admin') return;
+  const titleBeforeBrandApply = document.title;
+  const knownTitleSuffixes = [...new Set([publicBrandIdentity.brandName, defaultBrandIdentity.brandName])]
+    .map((name) => ` | ${name}`);
+  const liveTitleSuffix = knownTitleSuffixes.find((suffix) => titleBeforeBrandApply.endsWith(suffix));
+  const liveTitleBase = liveTitleSuffix
+    ? titleBeforeBrandApply.slice(0, -liveTitleSuffix.length)
+    : initialTitleBase;
+  const brand = {
+    ...defaultBrandIdentity,
+    ...incoming,
+    socials: { ...defaultBrandIdentity.socials, ...(incoming?.socials || {}) }
+  };
+  brand.brandName = String(brand.brandName || '').trim() || defaultBrandIdentity.brandName;
+  ['brandFont', 'headingFont', 'bodyFont'].forEach((key) => {
+    if (!publicFontStacks[brand[key]]) brand[key] = defaultBrandIdentity[key];
+  });
+  if (brand.uiFont !== 'same-body' && !publicFontStacks[brand.uiFont]) brand.uiFont = defaultBrandIdentity.uiFont;
+  if (!/^#[\da-f]{6}$/i.test(brand.brandNameColor || '')) brand.brandNameColor = defaultBrandIdentity.brandNameColor;
+  publicBrandIdentity = brand;
+  brand.pointerBrushEnabled = brand.pointerBrushEnabled !== false;
+  const root = document.documentElement;
+  root.style.setProperty('--font-brand', publicFontStacks[brand.brandFont]);
+  root.style.setProperty('--font-heading', publicFontStacks[brand.headingFont]);
+  root.style.setProperty('--font-body', publicFontStacks[brand.bodyFont]);
+  root.style.setProperty('--font-ui', brand.uiFont === 'same-body' ? publicFontStacks[brand.bodyFont] : publicFontStacks[brand.uiFont]);
+  root.style.setProperty('--brand-name-color', brand.brandNameColor.toLowerCase());
+  syncPublicSurfaceContrast();
+
+  document.querySelectorAll('.logo-wrap').forEach((wrapper) => {
+    const image = wrapper.querySelector('img');
+    const text = wrapper.querySelector('.brand');
+    if (text) text.textContent = brand.brandName;
+    if (image) {
+      image.hidden = !brand.logoPath;
+      if (brand.logoPath) {
+        image.src = siteAssetUrl(brand.logoPath);
+        image.alt = `${brand.brandName} logo`;
+        image.onerror = () => { image.hidden = true; };
+        image.onload = () => { image.hidden = false; };
+      }
+    }
+    wrapper.setAttribute('aria-label', brand.logoPath ? `${brand.brandName} brand` : brand.brandName);
+  });
+  const mascot = document.querySelector('.contact-mascot');
+  if (mascot) mascot.alt = `${brand.brandName} mascot illustration`;
+  const icon = document.querySelector('link[rel~="icon"]') || document.head.appendChild(document.createElement('link'));
+  icon.rel = 'icon';
+  const iconPath = brand.siteIconPath || defaultBrandIdentity.siteIconPath;
+  const iconUrl = new URL(siteAssetUrl(iconPath));
+  if (brand.updatedAt) iconUrl.searchParams.set('v', String(brand.updatedAt).replace(/[^\d]/g, ''));
+  icon.href = iconUrl.href;
+  const extension = iconPath.split('.').pop()?.toLowerCase();
+  icon.type = extension === 'svg' ? 'image/svg+xml' : extension === 'webp' ? 'image/webp' : extension === 'gif' ? 'image/gif' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : 'image/png';
+  if (liveTitleBase !== null) document.title = `${liveTitleBase} | ${brand.brandName}`;
+  updatePublicSocialLinks(brand.socials);
+  buildPublicFooter(brand);
+  if (brand.pointerBrushEnabled) initializePointerBrushEffect();
+  document.dispatchEvent(new CustomEvent('public-brand-applied', { detail: brand }));
+};
+
+const loadPublicBrand = async () => {
+  if (!useCmsApi || document.body.dataset.page === 'admin') return;
+  try {
+    const result = await cmsRequest('brand');
+    applyPublicBrand(result.brand);
+  } catch (error) {
+    applyPublicBrand(defaultBrandIdentity);
+  }
+};
+
+const brandForm = document.getElementById('brand-form');
+const brandMessage = document.querySelector('[data-brand-message]');
+const setBrandMessage = (message, state = '') => {
+  if (!brandMessage) return;
+  brandMessage.textContent = message;
+  brandMessage.classList.toggle('is-error', state === 'error');
+  brandMessage.classList.toggle('is-success', state === 'success');
+};
+const setBrandControls = (brand) => {
+  if (!brandForm) return;
+  brandForm.elements.brandName.value = brand.brandName;
+  brandForm.elements.brandNameColor.value = brand.brandNameColor;
+  brandForm.querySelector('[data-brand-color-hex]').value = brand.brandNameColor.toUpperCase();
+  brandForm.elements.brandFont.value = brand.brandFont;
+  brandForm.elements.headingFont.value = brand.headingFont;
+  brandForm.elements.bodyFont.value = brand.bodyFont;
+  brandForm.elements.uiFont.value = brand.uiFont;
+  brandForm.elements.pointerBrushEnabled.value = brand.pointerBrushEnabled === false ? '0' : '1';
+  ['instagram', 'facebook', 'twitter', 'youtube'].forEach((network) => {
+    brandForm.elements[network].value = brand.socials?.[network] || '';
+  });
+  brandForm.elements.textLogoOnly.checked = !brand.logoPath;
+  const logo = document.querySelector('[data-brand-logo-preview] img');
+  const icon = document.querySelector('[data-brand-icon-preview]');
+  const text = document.querySelector('[data-brand-text-preview]');
+  if (logo) {
+    logo.hidden = !brand.logoPath;
+    if (brand.logoPath) logo.src = siteAssetUrl(brand.logoPath);
+    logo.alt = `${brand.brandName} logo preview`;
+  }
+  if (icon) {
+    icon.src = siteAssetUrl(brand.siteIconPath || defaultBrandIdentity.siteIconPath);
+    icon.alt = `${brand.brandName} site icon preview`;
+  }
+  if (text) text.textContent = brand.brandName;
+};
+const loadAdminBrand = async () => {
+  if (!brandForm || !useCmsApi || !adminAuthenticated) return;
+  try {
+    const result = await cmsRequest('brand');
+    setBrandControls(result.brand);
+    setBrandMessage('Published Brand Identity loaded.');
+  } catch (error) {
+    setBrandMessage(error.message, 'error');
+  }
+};
+
+brandForm?.addEventListener('input', (event) => {
+  if (event.target.matches('[name="brandName"]')) document.querySelector('[data-brand-text-preview]').textContent = event.target.value || 'Brand Name';
+  if (event.target.matches('[name="brandNameColor"]')) brandForm.querySelector('[data-brand-color-hex]').value = event.target.value.toUpperCase();
+  if (event.target.matches('[data-brand-color-hex]')) {
+    const value = event.target.value.trim();
+    if (/^#[\da-f]{6}$/i.test(value)) brandForm.elements.brandNameColor.value = value;
+  }
+  if (event.target.matches('[name="textLogoOnly"]')) document.querySelector('[data-brand-logo-preview] img').hidden = event.target.checked;
+});
+
+brandForm?.querySelector('[name="logoFile"]')?.addEventListener('change', (event) => {
+  const [file] = event.target.files;
+  if (!file) return;
+  const preview = document.querySelector('[data-brand-logo-preview] img');
+  preview.src = URL.createObjectURL(file);
+  preview.hidden = false;
+  brandForm.elements.textLogoOnly.checked = false;
+});
+
+brandForm?.querySelector('[name="iconFile"]')?.addEventListener('change', (event) => {
+  const [file] = event.target.files;
+  if (file) document.querySelector('[data-brand-icon-preview]').src = URL.createObjectURL(file);
+});
+
+brandForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const hex = brandForm.querySelector('[data-brand-color-hex]').value.trim();
+  if (!/^#[\da-f]{6}$/i.test(hex)) {
+    setBrandMessage('Brand Name Color must be a six-digit HEX value.', 'error');
+    brandForm.querySelector('[data-brand-color-hex]').focus();
+    return;
+  }
+  brandForm.elements.brandNameColor.value = hex;
+  const submit = brandForm.querySelector('[data-brand-save]');
+  submit.disabled = true;
+  setBrandMessage('Saving Brand Identity…');
+  try {
+    const result = await cmsRequest('save-brand', { method: 'POST', body: new FormData(brandForm) });
+    setBrandControls(result.brand);
+    brandForm.elements.logoFile.value = '';
+    brandForm.elements.iconFile.value = '';
+    setBrandMessage('Brand Identity saved and published.', 'success');
+  } catch (error) {
+    setBrandMessage(error.message, 'error');
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 const contactForm = document.querySelector('.contact-form');
 const contactMessage = document.querySelector('[data-contact-message]');
@@ -3237,22 +3549,33 @@ const renderShopBannerArt = () => {
   });
 };
 
+const groupShopProductsByCategory = (products) => {
+  const collections = new Map();
+  products.forEach((product) => {
+    const label = typeof product.category === 'string' && product.category.trim()
+      ? product.category.trim().replace(/\s+/g, ' ')
+      : 'More from the studio';
+    const key = label.normalize('NFKC').toLocaleLowerCase();
+    if (!collections.has(key)) collections.set(key, { label, products: [] });
+    collections.get(key).products.push(product);
+  });
+  return collections;
+};
+
 const renderShopProducts = () => {
   if (!shopProductsTarget) return;
   shopProductsTarget.replaceChildren();
-  const collections = new Map();
-  shopProducts.forEach((product) => {
-    const category = typeof product.category === 'string' && product.category.trim() ? product.category.trim() : 'More from the studio';
-    if (!collections.has(category)) collections.set(category, []);
-    collections.get(category).push(product);
-  });
-  collections.forEach((products, category) => {
+  const collections = groupShopProductsByCategory(shopProducts);
+  collections.forEach(({ label, products }, key) => {
     const section = document.createElement('section');
     section.className = 'shop-collection';
+    section.dataset.categoryKey = key;
     const heading = document.createElement('h2');
-    heading.textContent = category;
+    heading.id = `shop-category-${[...collections.keys()].indexOf(key) + 1}`;
+    heading.textContent = label;
     const grid = document.createElement('div');
     grid.className = 'shop-grid';
+    grid.setAttribute('aria-labelledby', heading.id);
     grid.append(...products.map(createShopProductCard));
     section.append(heading, grid);
     shopProductsTarget.append(section);
@@ -3291,14 +3614,14 @@ const createProductBadges = (product) => {
 const updateShopProductMetadata = (product = null) => {
   const descriptionMeta = document.querySelector('[data-shop-meta-description]');
   if (!product) {
-    document.title = 'Shop | Dyndel Pino';
-    if (descriptionMeta) descriptionMeta.content = 'Browse original artwork and studio pieces by Dyndel Pino.';
+    document.title = brandDocumentTitle('Shop');
+    if (descriptionMeta) descriptionMeta.content = `Browse original artwork and studio pieces by ${publicBrandIdentity.brandName}.`;
     return;
   }
-  document.title = `${product.title} | Dyndel Pino`;
+  document.title = brandDocumentTitle(product.title);
   if (descriptionMeta) {
     const description = String(product.shortDescription || product.description || '').replace(/\s+/g, ' ').trim();
-    descriptionMeta.content = description.slice(0, 155) || `View ${product.title} by Dyndel Pino.`;
+    descriptionMeta.content = description.slice(0, 155) || `View ${product.title} by ${publicBrandIdentity.brandName}.`;
   }
 };
 
@@ -3397,7 +3720,7 @@ const renderShopProductState = (kind) => {
     state.append(retry);
   }
   shopProductDetailTarget.replaceChildren(state);
-  document.title = `${kind === 'error' ? 'Shop unavailable' : 'Artwork not found'} | Dyndel Pino`;
+  document.title = brandDocumentTitle(kind === 'error' ? 'Shop unavailable' : 'Artwork not found');
 };
 
 let setCartOpen = () => {};
@@ -4022,6 +4345,7 @@ renderHomepageGallery();
 const publicHomepageReady = Promise.allSettled([
   renderManagedProjectViews(),
   loadPublicTheme(),
+  loadPublicBrand(),
   renderPublicContent()
 ]);
 
@@ -4077,7 +4401,6 @@ if (homepageContact) {
   alignContact();
 }
 initializeStoriesArchive();
-updateSocialLinks();
 restoreCmsSession();
 
 const contactCtas = document.querySelectorAll('.contact-cta');
@@ -4094,3 +4417,5 @@ if (contactCtas.length && !window.matchMedia('(prefers-reduced-motion: reduce)')
 
   window.setTimeout(wiggleContactButton, 2400 + Math.random() * 3000);
 }
+
+document.documentElement.dataset.appReady = 'true';

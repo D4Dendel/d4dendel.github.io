@@ -1,8 +1,62 @@
 <?php
 declare(strict_types=1);
 
-session_start();
 require __DIR__ . '/config.php';
+
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
+error_reporting(E_ALL);
+ob_start();
+
+$discardApiOutput = static function (): void {
+    while (ob_get_level() > 0) ob_end_clean();
+};
+
+set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+    if (!(error_reporting() & $severity)) return false;
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(static function (Throwable $error) use ($discardApiOutput): void {
+    error_log(sprintf('API failure: %s in %s:%d', $error->getMessage(), $error->getFile(), $error->getLine()));
+    $discardApiOutput();
+    json_response(['error' => 'The server could not complete the request.'], 500);
+});
+
+register_shutdown_function(static function () use ($discardApiOutput): void {
+    $error = error_get_last();
+    if (!$error || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
+    error_log(sprintf('API fatal error: %s in %s:%d', $error['message'], $error['file'], $error['line']));
+    $discardApiOutput();
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode(['error' => 'The server could not complete the request.'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+});
+
+$iniBytes = static function (string $value): int {
+    $value = trim($value);
+    if ($value === '') return 0;
+    $unit = strtolower(substr($value, -1));
+    $number = (float)$value;
+    return match ($unit) {
+        'g' => (int)($number * 1024 * 1024 * 1024),
+        'm' => (int)($number * 1024 * 1024),
+        'k' => (int)($number * 1024),
+        default => (int)$number,
+    };
+};
+
+$contentLength = filter_var($_SERVER['CONTENT_LENGTH'] ?? 0, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+$postMaximum = $iniBytes((string)ini_get('post_max_size'));
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contentLength !== false && $postMaximum > 0 && $contentLength > $postMaximum) {
+    error_log("API upload rejected: request length {$contentLength} exceeds post_max_size {$postMaximum}.");
+    json_response(['error' => 'The upload request is too large. Choose files within the stated size limits.'], 413);
+}
+
+session_start();
 require __DIR__ . '/shop_products.php';
 require __DIR__ . '/shop_checkout.php';
 
@@ -41,6 +95,90 @@ $readTheme = static function () use ($themeDefaults): array {
     } catch (Throwable $error) {
         return $themeDefaults;
     }
+};
+
+$brandDefaults = [
+    'brandName' => 'Dyndel Pino',
+    'logoPath' => 'img/icon.png',
+    'siteIconPath' => 'img/icon.png',
+    'brandNameColor' => '#f3a889',
+    'brandFont' => 'patrick-hand',
+    'headingFont' => 'patrick-hand',
+    'bodyFont' => 'nunito',
+    'uiFont' => 'same-body',
+    'pointerBrushEnabled' => true,
+    'socials' => [
+        'instagram' => 'https://www.instagram.com/d4dyndel',
+        'facebook' => 'https://www.facebook.com/d4dyndel',
+        'twitter' => 'https://twitter.com/d4dyndel',
+        'youtube' => 'https://www.youtube.com/@d4dyndel',
+    ],
+    'updatedAt' => null,
+];
+$brandFonts = ['patrick-hand', 'nunito', 'georgia', 'system-sans'];
+$uiFonts = ['same-body', 'nunito', 'georgia', 'system-sans'];
+
+$readBrand = static function () use ($brandDefaults, $brandFonts, $uiFonts): array {
+    try {
+        $row = db()->query(
+            'SELECT brand_name, brand_logo_path, site_icon_path, brand_name_color, brand_font, heading_font, body_font, ui_font, pointer_brush_enabled,
+                    instagram_url, facebook_url, twitter_url, youtube_url, updated_at
+             FROM site_settings WHERE id = 1'
+        )->fetch();
+        if (!$row) return $brandDefaults;
+        $brand = [
+            'brandName' => trim((string)$row['brand_name']) ?: $brandDefaults['brandName'],
+            'logoPath' => trim((string)($row['brand_logo_path'] ?? '')) ?: null,
+            'siteIconPath' => trim((string)($row['site_icon_path'] ?? '')) ?: $brandDefaults['siteIconPath'],
+            'brandNameColor' => strtolower((string)$row['brand_name_color']),
+            'brandFont' => (string)$row['brand_font'],
+            'headingFont' => (string)$row['heading_font'],
+            'bodyFont' => (string)$row['body_font'],
+            'uiFont' => (string)$row['ui_font'],
+            'pointerBrushEnabled' => (bool)$row['pointer_brush_enabled'],
+            'socials' => [
+                'instagram' => trim((string)($row['instagram_url'] ?? '')),
+                'facebook' => trim((string)($row['facebook_url'] ?? '')),
+                'twitter' => trim((string)($row['twitter_url'] ?? '')),
+                'youtube' => trim((string)($row['youtube_url'] ?? '')),
+            ],
+            'updatedAt' => $row['updated_at'] ?? null,
+        ];
+        if (!preg_match('/^#[0-9a-f]{6}$/i', $brand['brandNameColor'])) $brand['brandNameColor'] = $brandDefaults['brandNameColor'];
+        foreach (['brandFont', 'headingFont', 'bodyFont'] as $key) {
+            if (!in_array($brand[$key], $brandFonts, true)) $brand[$key] = $brandDefaults[$key];
+        }
+        if (!in_array($brand['uiFont'], $uiFonts, true)) $brand['uiFont'] = $brandDefaults['uiFont'];
+        return $brand;
+    } catch (Throwable $error) {
+        return $brandDefaults;
+    }
+};
+
+$storeBrandImage = static function (mixed $file, string $kind): ?array {
+    if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+    $maximumBytes = $kind === 'icon' ? 1024 * 1024 : 4 * 1024 * 1024;
+    $maximumDimension = $kind === 'icon' ? 1024 : 4096;
+    if ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+        || (int)($file['size'] ?? 0) < 1
+        || (int)$file['size'] > $maximumBytes
+        || !isset($file['tmp_name'])
+        || !is_uploaded_file($file['tmp_name'])) {
+        throw new DomainException(ucfirst($kind) . ' upload failed or exceeds the allowed size.');
+    }
+    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $image = @getimagesize($file['tmp_name']);
+    if (!isset($allowed[$mime]) || $image === false || ($image['mime'] ?? '') !== $mime
+        || $image[0] < 1 || $image[1] < 1 || $image[0] > $maximumDimension || $image[1] > $maximumDimension) {
+        throw new DomainException(ucfirst($kind) . ' must be a valid JPG, PNG, GIF, or WebP image within the dimension limit.');
+    }
+    $folder = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'img' . DIRECTORY_SEPARATOR . 'projectfolder' . DIRECTORY_SEPARATOR . 'brand' . DIRECTORY_SEPARATOR;
+    if (!is_dir($folder) && !mkdir($folder, 0755, true)) throw new RuntimeException('Brand media directory is unavailable.');
+    $filename = bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+    $diskPath = $folder . $filename;
+    if (!move_uploaded_file($file['tmp_name'], $diskPath)) throw new RuntimeException('Could not save brand media.');
+    return ['path' => 'img/projectfolder/brand/' . $filename, 'diskPath' => $diskPath];
 };
 
 $postBoolean = static function (string $key): int {
@@ -356,6 +494,83 @@ if ($action === 'session' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 if ($action === 'theme' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     header('Cache-Control: no-store, max-age=0');
     json_response(['theme' => $readTheme()]);
+}
+
+if ($action === 'brand' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Cache-Control: no-store, max-age=0');
+    json_response(['brand' => $readBrand()]);
+}
+
+if ($action === 'save-brand') {
+    require_post();
+    require_auth();
+    $current = $readBrand();
+    $brandName = trim((string)($_POST['brandName'] ?? ''));
+    if ($brandName === '' || preg_match('//u', $brandName) !== 1 || mb_strlen($brandName, 'UTF-8') > 120) {
+        json_response(['error' => 'Brand Name is required and must be 120 characters or fewer.'], 422);
+    }
+    $brandNameColor = strtolower(trim((string)($_POST['brandNameColor'] ?? '')));
+    if (!preg_match('/^#[0-9a-f]{6}$/', $brandNameColor)) json_response(['error' => 'Brand Name Color must be a six-digit HEX color.'], 422);
+    $brandFont = (string)($_POST['brandFont'] ?? '');
+    $headingFont = (string)($_POST['headingFont'] ?? '');
+    $bodyFont = (string)($_POST['bodyFont'] ?? '');
+    $uiFont = (string)($_POST['uiFont'] ?? '');
+    foreach (['Brand Font' => $brandFont, 'Heading Font' => $headingFont, 'Body Font' => $bodyFont] as $label => $font) {
+        if (!in_array($font, $brandFonts, true)) json_response(['error' => "Invalid {$label}."], 422);
+    }
+    if (!in_array($uiFont, $uiFonts, true)) json_response(['error' => 'Invalid UI Font.'], 422);
+    $pointerBrushRaw = $_POST['pointerBrushEnabled'] ?? ($current['pointerBrushEnabled'] ? '1' : '0');
+    if (in_array($pointerBrushRaw, ['1', 1, true, 'true', 'on'], true)) $pointerBrushEnabled = 1;
+    elseif (in_array($pointerBrushRaw, ['0', 0, false, 'false', 'off'], true)) $pointerBrushEnabled = 0;
+    else json_response(['error' => 'Pointer Brush Effect must be On or Off.'], 422);
+    $socials = [];
+    foreach (['instagram', 'facebook', 'twitter', 'youtube'] as $network) {
+        $value = trim((string)($_POST[$network] ?? ''));
+        if ($value !== '') {
+            $parts = parse_url($value);
+            if (!filter_var($value, FILTER_VALIDATE_URL) || !is_array($parts) || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true)) {
+                json_response(['error' => ucfirst($network) . ' must be a valid HTTP(S) URL or left blank.'], 422);
+            }
+            if (strlen($value) > 500) json_response(['error' => ucfirst($network) . ' URL must be 500 characters or fewer.'], 422);
+        }
+        $socials[$network] = $value;
+    }
+
+    $logo = null;
+    $icon = null;
+    try {
+        $logo = $storeBrandImage($_FILES['logoFile'] ?? null, 'logo');
+        $icon = $storeBrandImage($_FILES['iconFile'] ?? null, 'icon');
+        $logoPath = !empty($_POST['textLogoOnly']) ? null : ($logo['path'] ?? $current['logoPath']);
+        $siteIconPath = $icon['path'] ?? $current['siteIconPath'] ?? $brandDefaults['siteIconPath'];
+        $stmt = db()->prepare(
+            'INSERT INTO site_settings
+                (id, brand_name, brand_logo_path, site_icon_path, brand_name_color, brand_font, heading_font, body_font, ui_font, pointer_brush_enabled,
+                 instagram_url, facebook_url, twitter_url, youtube_url)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                brand_name = VALUES(brand_name), brand_logo_path = VALUES(brand_logo_path), site_icon_path = VALUES(site_icon_path),
+                brand_name_color = VALUES(brand_name_color), brand_font = VALUES(brand_font), heading_font = VALUES(heading_font),
+                body_font = VALUES(body_font), ui_font = VALUES(ui_font), pointer_brush_enabled = VALUES(pointer_brush_enabled), instagram_url = VALUES(instagram_url),
+                facebook_url = VALUES(facebook_url), twitter_url = VALUES(twitter_url), youtube_url = VALUES(youtube_url)'
+        );
+        $stmt->execute([
+            $brandName, $logoPath, $siteIconPath, $brandNameColor, $brandFont, $headingFont, $bodyFont, $uiFont, $pointerBrushEnabled,
+            $socials['instagram'], $socials['facebook'], $socials['twitter'], $socials['youtube'],
+        ]);
+    } catch (DomainException $error) {
+        foreach ([$logo, $icon] as $upload) {
+            if ($upload && is_file($upload['diskPath'])) unlink($upload['diskPath']);
+        }
+        json_response(['error' => $error->getMessage()], 422);
+    } catch (Throwable $error) {
+        foreach ([$logo, $icon] as $upload) {
+            if ($upload && is_file($upload['diskPath'])) unlink($upload['diskPath']);
+        }
+        error_log('Brand Identity save failed: ' . $error->getMessage());
+        json_response(['error' => 'Brand Identity could not be saved.'], 500);
+    }
+    json_response(['saved' => true, 'brand' => $readBrand()]);
 }
 
 if ($action === 'save-theme') {

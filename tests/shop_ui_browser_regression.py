@@ -206,7 +206,7 @@ class CdpClient:
             time.sleep(0.1)
         raise AssertionError("Browser condition timed out: " + expression)
 
-    def navigate(self, url, condition="document.readyState === 'complete'"):
+    def navigate(self, url, condition="document.readyState !== 'loading' && document.documentElement.dataset.appReady === 'true'"):
         self.call("Page.navigate", {"url": url})
         self.wait_for(condition, 15)
 
@@ -292,18 +292,71 @@ def normalized_non_media(product):
     return preserved
 
 
+def brand_save_payload(brand, enabled):
+    payload = {
+        "brandName": brand["brandName"],
+        "brandNameColor": brand["brandNameColor"],
+        "brandFont": brand["brandFont"],
+        "headingFont": brand["headingFont"],
+        "bodyFont": brand["bodyFont"],
+        "uiFont": brand["uiFont"],
+        "pointerBrushEnabled": "1" if enabled else "0",
+        "instagram": brand["socials"].get("instagram", ""),
+        "facebook": brand["socials"].get("facebook", ""),
+        "twitter": brand["socials"].get("twitter", ""),
+        "youtube": brand["socials"].get("youtube", ""),
+    }
+    if not brand.get("logoPath"):
+        payload["textLogoOnly"] = "1"
+    return payload
+
+
+def mysql_text_literal(value):
+    if value is None:
+        return "NULL"
+    return "CONVERT(UNHEX('" + str(value).encode("utf-8").hex() + "') USING utf8mb4)"
+
+
+def restore_brand_identity(brand):
+    values = {
+        "brand_name": brand["brandName"],
+        "brand_logo_path": brand.get("logoPath"),
+        "site_icon_path": brand.get("siteIconPath"),
+        "brand_name_color": brand["brandNameColor"],
+        "brand_font": brand["brandFont"],
+        "heading_font": brand["headingFont"],
+        "body_font": brand["bodyFont"],
+        "ui_font": brand["uiFont"],
+        "pointer_brush_enabled": 1 if brand["pointerBrushEnabled"] else 0,
+        "instagram_url": brand["socials"].get("instagram", ""),
+        "facebook_url": brand["socials"].get("facebook", ""),
+        "twitter_url": brand["socials"].get("twitter", ""),
+        "youtube_url": brand["socials"].get("youtube", ""),
+        "updated_at": brand["updatedAt"],
+    }
+    assignments = []
+    for column, value in values.items():
+        assignments.append(f"`{column}`={value if isinstance(value, int) else mysql_text_literal(value)}")
+    mysql_value("UPDATE site_settings SET " + ",".join(assignments) + " WHERE id=1;")
+
+
 checks = 0
 token = secrets.token_hex(4)
 session_id = "shopuibrowser" + token
 fixture_ids = []
 content_fixture_ids = []
 uploaded_test_paths = []
+brand_uploaded_test_paths = []
+brand_restore_required = False
 chrome = None
 cdp = None
 profile = tempfile.mkdtemp(prefix="dyndel-shop-browser-")
 source_image = tempfile.NamedTemporaryFile(prefix="dyndel-shop-upload-", suffix=".png", delete=False)
 source_image.write(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
 source_image.close()
+source_gif = tempfile.NamedTemporaryFile(prefix="dyndel-brand-browser-", suffix=".gif", delete=False)
+source_gif.write(bytes.fromhex("47494638396101000100800000000000ffffff21ff0b4e45545343415045322e30030100000021f904000a0000002c000000000100010000020244010021f904000a0000002c00000000010001000002024c01003b"))
+source_gif.close()
 
 auto_result = subprocess.run([
     MYSQL, "--host=127.0.0.1", "--user=root", "--batch", "--skip-column-names",
@@ -330,6 +383,12 @@ status, initial_shop_response = api_request("shop")
 expect(status == 200 and initial_shop_response.get("products"), "Could not capture the initial public Shop")
 initial_public_products = initial_shop_response["products"]
 initial_public_count = len(initial_public_products)
+status, initial_brand_response = api_request("brand")
+expect(status == 200 and initial_brand_response.get("brand"), "Could not capture the initial Brand Identity")
+initial_brand = initial_brand_response["brand"]
+initial_pointer_brush_enabled = bool(initial_brand["pointerBrushEnabled"])
+initial_brand_updated_at = str(initial_brand["updatedAt"])
+expect(re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", initial_brand_updated_at) is not None, "Brand Identity timestamp was not restorable")
 
 try:
     chrome, websocket_url = start_chrome(profile)
@@ -353,7 +412,7 @@ try:
     ]
     for route, expected_section, expected_child in desktop_routes:
         expected_path = urllib.parse.urlparse(BASE + route).path
-        cdp.navigate(BASE + route, f"document.readyState !== 'loading' && location.pathname === {js_string(expected_path)} && document.querySelectorAll('.nav-list > li').length === 5")
+        cdp.navigate(BASE + route, f"document.readyState !== 'loading' && document.documentElement.dataset.appReady === 'true' && location.pathname === {js_string(expected_path)} && document.querySelectorAll('.nav-list > li').length === 5")
         navigation_state = cdp.evaluate("""
             (() => {
                 const cart=document.querySelector('[data-open-cart]');
@@ -393,6 +452,15 @@ try:
         expect(navigation_state["cartVisibility"] == "hidden" and navigation_state["cartTabIndex"] == -1 and not navigation_state["overflow"], f"Cart or horizontal layout regressed outside Store on {route}")
         if expected_child:
             capture_screenshot(cdp, f"navigation-desktop-{expected_child}.png", full_page=False)
+        elif route == "index.html":
+            cdp.wait_for("document.querySelectorAll('.home-gallery .gallery-card').length > 0", 15)
+            capture_screenshot(cdp, "global-brand-home-desktop.png")
+        elif route == "stories.php":
+            cdp.wait_for("document.querySelector('[data-stories-results]').getAttribute('aria-busy') === 'false'", 15)
+            capture_screenshot(cdp, "global-brand-stories-desktop.png")
+        elif route.startswith("story.php"):
+            cdp.wait_for("Boolean(document.querySelector('.story-article h1'))", 15)
+            capture_screenshot(cdp, "global-brand-story-desktop.png")
         checks += 5
 
     cdp.call("Page.bringToFront")
@@ -556,15 +624,67 @@ try:
                 root.style.setProperty('--blue-deep',accent);
                 root.style.setProperty('--panel-strong',surface);
                 root.style.setProperty('--text',text);
+                syncPublicSurfaceContrast();
                 return {name,submenu:getComputedStyle(document.querySelector('.nav-submenu')).backgroundColor,active:getComputedStyle(activeElement).color,focus:getComputedStyle(document.querySelector('[data-works-toggle]')).outlineColor};
             });
             names.forEach(name=>original[name] ? root.style.setProperty(name,original[name]) : root.style.removeProperty(name));
+            syncPublicSurfaceContrast();
             activeElement.style.transition=originalTransition;
             return signatures;
         })()
     """)
     expect(len({item["submenu"] for item in theme_signatures}) == 3 and len({item["active"] for item in theme_signatures}) == 3, "Default, Pastel, and Midnight token palettes did not restyle navigation: " + json.dumps(theme_signatures))
     checks += 14
+
+    pointer_routes = [
+        "index.html",
+        "illustration.html",
+        "stories.php",
+        "story.php?slug=" + urllib.parse.quote(navigation_story["slug"]),
+        "store.html",
+        "store.html?product=" + urllib.parse.quote(initial_public_products[0]["slug"]),
+        "checkout.html",
+        "terms.html",
+    ]
+    status, pointer_off_save = api_request("save-brand", "POST", brand_save_payload(initial_brand, False), session_id)
+    brand_restore_required = True
+    status_reload, pointer_off_reload = api_request("brand")
+    expect(status == 200 and status_reload == 200 and pointer_off_save["brand"]["pointerBrushEnabled"] is False and pointer_off_reload["brand"]["pointerBrushEnabled"] is False, "Pointer Brush Effect OFF did not save and persist")
+    pointer_off_routes = []
+    for route in pointer_routes:
+        cdp.navigate(BASE + route)
+        cdp.wait_for("Boolean(document.querySelector('.footer-groups'))", 15)
+        pointer_off_routes.append(cdp.evaluate("({canvas:document.querySelectorAll('.pointer-canvas').length,mascot:document.querySelectorAll('.contact-mascot').length})"))
+    expect(all(state == {"canvas": 0, "mascot": 1} for state in pointer_off_routes), "Pointer Brush Effect OFF initialized public brush work or removed KAI: " + json.dumps(pointer_off_routes))
+
+    status, pointer_on_save = api_request("save-brand", "POST", brand_save_payload(initial_brand, True), session_id)
+    status_reload, pointer_on_reload = api_request("brand")
+    expect(status == 200 and status_reload == 200 and pointer_on_save["brand"]["pointerBrushEnabled"] is True and pointer_on_reload["brand"]["pointerBrushEnabled"] is True, "Pointer Brush Effect ON did not save and persist")
+    pointer_on_routes = []
+    for route in pointer_routes:
+        cdp.navigate(BASE + route)
+        cdp.wait_for("Boolean(document.querySelector('.footer-groups'))", 15)
+        pointer_on_routes.append(cdp.evaluate("document.querySelectorAll('.pointer-canvas').length"))
+    expect(pointer_on_routes == [1] * len(pointer_routes), "Pointer Brush Effect ON was not initialized consistently: " + json.dumps(pointer_on_routes))
+    brush_painted = cdp.evaluate("""
+        (() => {
+            const canvas=document.querySelector('.pointer-canvas');
+            window.dispatchEvent(new PointerEvent('pointermove',{clientX:90,clientY:90,pressure:0.8}));
+            const pixels=canvas.getContext('2d').getImageData(0,0,180,180).data;
+            return canvas.width > 0 && pixels.some((value,index)=>index%4===3&&value>0);
+        })()
+    """)
+    expect(brush_painted is True, "Pointer Brush Effect ON created a canvas but did not paint")
+    cdp.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
+    cdp.navigate(BASE + "index.html")
+    cdp.wait_for("Boolean(document.querySelector('.footer-groups'))", 15)
+    expect(cdp.evaluate("document.querySelectorAll('.pointer-canvas').length") == 0, "Reduced motion did not prevent Pointer Brush initialization while the setting was ON")
+    cdp.call("Emulation.setEmulatedMedia", {"features": []})
+    restore_brand_identity(initial_brand)
+    brand_restore_required = False
+    status, restored_brand = api_request("brand")
+    expect(status == 200 and restored_brand["brand"]["pointerBrushEnabled"] is initial_pointer_brush_enabled and restored_brand["brand"]["updatedAt"] == initial_brand_updated_at, "Pointer Brush Effect browser test did not restore the original Brand Identity state")
+    checks += 7
 
     store_url = BASE + "store.html"
     cdp.evaluate(f"location.assign({js_string(store_url)})")
@@ -615,7 +735,7 @@ try:
                 bannerHeaderGap:bannerRect.top-header.getBoundingClientRect().bottom,
                 bannerImages:document.querySelectorAll('[data-shop-banner-art] img').length,
                 headings:[...document.querySelectorAll('.shop-collection > h2')].map(item => item.textContent),
-                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                columns:Math.round(document.querySelector('.shop-grid').getBoundingClientRect().width/cardRect.width),
                 titlePriceGap:price.top-title.bottom,
                 cardRadius:parseFloat(cardStyle.borderTopLeftRadius),
                 cardSurface:cardStyle.backgroundColor,
@@ -628,19 +748,64 @@ try:
                 currentTop:topItems.filter(item => item.hasAttribute('aria-current')).map(item => item.dataset.navSection || 'works'),
                 navPositions,
                 hiddenCartNavPositions,
-                overflow:document.documentElement.scrollWidth > innerWidth
+                overflow:document.documentElement.scrollWidth > innerWidth,
+                brand:document.querySelector('.brand').textContent,
+                logoAlt:document.querySelector('.logo-wrap img').alt,
+                logoSource:new URL(document.querySelector('.logo-wrap img').src).pathname,
+                favicon:new URL(document.querySelector('link[rel~="icon"]').href).pathname,
+                headerBackground:getComputedStyle(header).backgroundColor,
+                fontBrand:getComputedStyle(document.documentElement).getPropertyValue('--font-brand').trim(),
+                footerHeadings:[...document.querySelectorAll('.footer-group h2')].map(item=>item.textContent),
+                footerSocials:document.querySelectorAll('.footer-social-link').length
             };
         })()
     """)
     expect(storefront_shell["bannerHeight"] <= 300 and storefront_shell["bannerImages"] == 3 and abs(storefront_shell["bannerLeft"]) < 1 and abs(storefront_shell["bannerRight"] - storefront_shell["viewportWidth"]) < 1 and abs(storefront_shell["bannerHeaderGap"]) < 1, "Desktop Shop banner was not full-bleed, flush to the header, short, and artwork-led: " + json.dumps(storefront_shell))
-    expect(storefront_shell["headings"] and storefront_shell["columns"] == 3 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
+    expect(storefront_shell["headings"] and storefront_shell["columns"] == 4 and not storefront_shell["overflow"], "Desktop collection/grid layout was incorrect")
     expect(0 <= storefront_shell["titlePriceGap"] <= 8 and storefront_shell["cardRadius"] >= 10 and storefront_shell["cardSurface"] != "rgba(0, 0, 0, 0)" and storefront_shell["linkCoversCard"], "Desktop product cards were not compact, rounded, surfaced, and fully linked")
     expect(storefront_shell["cartInHeader"] and storefront_shell["cartWidth"] == 82 and storefront_shell["cartVisibility"] == "visible" and storefront_shell["cartTabIndex"] == 0 and storefront_shell["emptyCountHidden"] and storefront_shell["currentTop"] == ["store"], "Desktop Store/Cart navigation state was incorrect")
     expect(storefront_shell["navPositions"] == storefront_shell["hiddenCartNavPositions"], "Reserved desktop Cart slot shifted the primary navigation when Cart visibility changed")
+    expected_social_count = len([value for value in initial_brand["socials"].values() if value])
+    expect(storefront_shell["brand"] == initial_brand["brandName"] and storefront_shell["logoAlt"] == initial_brand["brandName"] + " logo" and storefront_shell["logoSource"].endswith(initial_brand["logoPath"] or "img/icon.png") and storefront_shell["favicon"].endswith(initial_brand["siteIconPath"] or "img/icon.png"), "Public Brand Name, logo, alt text, or favicon did not use Brand Identity")
+    expect(storefront_shell["fontBrand"] and storefront_shell["footerHeadings"][:2] == ["Explore", "Policies"] and storefront_shell["footerSocials"] == expected_social_count, "Typography or compact global footer did not use Brand Identity")
+    category_grouping = cdp.evaluate("[...groupShopProductsByCategory([{category:' Stickers '},{category:'stickers'},{category:null},{category:'  DIGITAL  '}]).values()].map(group=>({label:group.label,count:group.products.length}))")
+    expect(category_grouping == [{"label": "Stickers", "count": 2}, {"label": "More from the studio", "count": 1}, {"label": "DIGITAL", "count": 1}], "Store category normalization, fallback, or first-appearance ordering was incorrect: " + json.dumps(category_grouping))
+    centered_rows = cdp.evaluate("""
+        (() => {
+            const reference=document.querySelector('.shop-grid');
+            const width=reference.getBoundingClientRect().width;
+            return Array.from({length:9},(_,index)=>index+1).map(count=>{
+                const grid=document.createElement('div');
+                grid.className='shop-grid';
+                Object.assign(grid.style,{position:'absolute',visibility:'hidden',width:`${width}px`,left:'0',top:'0'});
+                for(let item=0;item<count;item+=1){const card=document.createElement('article');card.className='shop-product';card.style.height='20px';grid.append(card);}
+                document.body.append(grid);
+                const rect=grid.getBoundingClientRect();
+                const cards=[...grid.children].map(card=>card.getBoundingClientRect());
+                const finalTop=Math.max(...cards.map(card=>card.top));
+                const finalRow=cards.filter(card=>Math.abs(card.top-finalTop)<1);
+                const rowCenter=(finalRow[0].left+finalRow.at(-1).right)/2;
+                const result={count,centered:Math.abs(rowCenter-(rect.left+rect.width/2))<2,capacity:Math.round(rect.width/cards[0].width)};
+                grid.remove();
+                return result;
+            });
+        })()
+    """)
+    expect(all(item["centered"] and item["capacity"] == 4 for item in centered_rows), "One-to-nine product category rows were not robustly centered at desktop width: " + json.dumps(centered_rows))
     status, theme_response = api_request("theme")
     applied_accent = cdp.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--blue-deep').trim().toLowerCase()")
     expect(status == 200 and applied_accent == theme_response["theme"]["accentColor"].lower(), "Public Shop did not apply the published theme")
-    checks += 10
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1200, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+    store_1200 = cdp.evaluate("(() => {const grid=document.querySelector('.shop-grid').getBoundingClientRect();const card=document.querySelector('.shop-product').getBoundingClientRect();return{capacity:Math.round(grid.width/card.width),overflow:document.documentElement.scrollWidth>innerWidth,footerColumns:getComputedStyle(document.querySelector('.footer-groups')).gridTemplateColumns.split(' ').length};})()")
+    expect(store_1200 == {"capacity": 4, "overflow": False, "footerColumns": 3}, "1200px Store/brand/footer layout was incorrect: " + json.dumps(store_1200))
+    capture_screenshot(cdp, "global-brand-store-1200.png")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 768, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+    cdp.wait_for("getComputedStyle(document.querySelector('.nav')).visibility === 'hidden' && getComputedStyle(document.querySelector('.menu-toggle')).display !== 'none'", 5)
+    store_768 = cdp.evaluate("(() => {const grid=document.querySelector('.shop-grid').getBoundingClientRect();const card=document.querySelector('.shop-product').getBoundingClientRect();return{capacity:Math.round(grid.width/card.width),overflow:document.documentElement.scrollWidth>innerWidth,brand:document.querySelector('.brand').textContent,navVisibility:getComputedStyle(document.querySelector('.nav')).visibility,menuDisplay:getComputedStyle(document.querySelector('.menu-toggle')).display};})()")
+    expect(store_768["capacity"] == 3 and not store_768["overflow"] and store_768["brand"] == initial_brand["brandName"] and store_768["navVisibility"] == "hidden" and store_768["menuDisplay"] != "none", "768px Store/header layout was incorrect: " + json.dumps(store_768))
+    capture_screenshot(cdp, "global-brand-store-768.png")
+    cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+    checks += 16
 
     first_product = initial_public_products[0]
     second_product = initial_public_products[1]
@@ -798,10 +963,11 @@ try:
         (() => {
             const cart=document.querySelector('[data-open-cart]');
             const slot=document.querySelector('.header-cart-slot');
-            return {cartDisplay:getComputedStyle(slot).display,cartVisibility:getComputedStyle(cart).visibility,cartTabIndex:cart.tabIndex,cartHidden:cart.getAttribute('aria-hidden'),overflow:document.documentElement.scrollWidth > innerWidth};
+            return {cartDisplay:getComputedStyle(slot).display,cartVisibility:getComputedStyle(cart).visibility,cartTabIndex:cart.tabIndex,cartHidden:cart.getAttribute('aria-hidden'),pointerBrush:document.querySelectorAll('.pointer-canvas').length,overflow:document.documentElement.scrollWidth > innerWidth};
         })()
     """)
-    expect(mobile_home == {"cartDisplay": "none", "cartVisibility": "hidden", "cartTabIndex": -1, "cartHidden": "true", "overflow": False}, "Mobile Cart occupied visible or keyboard space outside Store")
+    expect(mobile_home == {"cartDisplay": "none", "cartVisibility": "hidden", "cartTabIndex": -1, "cartHidden": "true", "pointerBrush": 0, "overflow": False}, "Mobile Cart or Pointer Brush occupied visible or runtime space outside Store")
+    capture_screenshot(cdp, "global-brand-home-mobile.png")
     cdp.evaluate("document.querySelector('.menu-toggle').click(); document.querySelector('[data-works-toggle]').click()")
     cdp.wait_for("getComputedStyle(document.querySelector('.nav')).visibility === 'visible' && Number(getComputedStyle(document.querySelector('.nav')).opacity) === 1 && getComputedStyle(document.querySelector('.nav-submenu')).display === 'grid'", 5)
     mobile_works = cdp.evaluate("""
@@ -896,6 +1062,16 @@ try:
         cdp.evaluate("document.querySelector('.menu-toggle').click()")
         checks += 3
 
+    cdp.navigate(BASE + "stories.php")
+    cdp.wait_for("document.querySelector('[data-stories-results]').getAttribute('aria-busy') === 'false'", 15)
+    expect(cdp.evaluate("document.documentElement.scrollWidth <= innerWidth && Boolean(document.querySelector('.footer-groups'))") is True, "Mobile Stories brand/footer layout overflowed")
+    capture_screenshot(cdp, "global-brand-stories-mobile.png")
+    cdp.navigate(BASE + "story.php?slug=" + urllib.parse.quote(navigation_story["slug"]))
+    cdp.wait_for("Boolean(document.querySelector('.story-article h1'))", 15)
+    expect(cdp.evaluate("document.documentElement.scrollWidth <= innerWidth && Boolean(document.querySelector('.footer-groups'))") is True, "Mobile Story reader brand/footer layout overflowed")
+    capture_screenshot(cdp, "global-brand-story-mobile.png")
+    checks += 2
+
     cdp.navigate(BASE + "store.html", f"document.readyState === 'complete' && document.querySelectorAll('.shop-product').length === {initial_public_count}")
     mobile_state = cdp.evaluate("""
         (() => {
@@ -917,7 +1093,7 @@ try:
                 cartInHeader:Boolean(cart.closest('.header')),
                 cartWidth:cartRect.width,
                 cartOverlap:overlaps(cartRect,cardRect) || overlaps(cartRect,mascot),
-                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                columns:Math.round(document.querySelector('.shop-grid').getBoundingClientRect().width/cardRect.width),
                 bannerHeight:banner.height,
                 bannerEdges:Math.abs(banner.left) < 1 && Math.abs(banner.right-innerWidth) < 1,
                 bannerHeaderGap:banner.top-header.bottom,
@@ -1421,7 +1597,7 @@ try:
             };
         })()
     """ % normal_product["id"])
-    expect(normal_detail["productId"] == normal_product["id"] and normal_detail["title"] == normal_product["title"] and normal_detail["pageTitle"] == normal_product["title"] + " | Dyndel Pino", "Normal internal Product Detail identity or document title was incorrect")
+    expect(normal_detail["productId"] == normal_product["id"] and normal_detail["title"] == normal_product["title"] and normal_detail["pageTitle"] == normal_product["title"] + " | " + initial_brand["brandName"], "Normal internal Product Detail identity or document title was incorrect: " + json.dumps(normal_detail))
     expect(normal_detail["description"] == normal_product["description"] and normal_detail["price"] and normal_detail["imageLoaded"] and normal_detail["imageAlt"], "Normal Product Detail omitted its description, price, or accessible artwork")
     expect(normal_detail["columns"] == 2 and normal_detail["bannerDisplay"] == "none" and normal_detail["catalogDisplay"] == "none" and not normal_detail["overflow"], "Desktop Product Detail layout, banner removal, or overflow was incorrect: " + json.dumps(normal_detail))
     expect(normal_detail["cartVisible"] == "visible" and normal_detail["storeCurrent"] == "page" and normal_detail["actionText"] == "Add to Cart" and normal_detail["actionHeight"] >= 44 and normal_detail["h1Count"] == 1, "Product Detail navigation, heading, or internal action regressed")
@@ -1505,7 +1681,7 @@ try:
 
     status, _ = api_request("product", "POST", {"id": sold_internal_id, "publicationStatus": "draft"}, session_id)
     expect(status == 200, "Could not set Product Detail fixture to draft")
-    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(sold_internal_fields["slug"]), "Boolean(document.querySelector('.shop-product-state h1'))")
+    cdp.navigate(BASE + "store.html?product=" + urllib.parse.quote(sold_internal_fields["slug"]), "Boolean(document.querySelector('.shop-product-state h1')) && document.title.startsWith('Artwork not found')")
     draft_state = cdp.evaluate("({heading:document.querySelector('.shop-product-state h1').textContent,body:document.querySelector('.shop-product-state').textContent,title:document.title,rawError:document.body.innerText.includes('404')})")
     expect(draft_state["heading"] == "Artwork not found." and "Back to Store" in draft_state["body"] and draft_state["title"].startswith("Artwork not found") and not draft_state["rawError"], "Draft Product Detail did not return a friendly not-found state")
     status, _ = api_request("product", "POST", {"id": sold_internal_id, "publicationStatus": "published", "showWhenSoldOut": "0"}, session_id)
@@ -1572,7 +1748,7 @@ try:
             card.querySelector('.shop-product-link').blur();
             await new Promise(resolve => setTimeout(resolve, 700));
             return {{
-                columns:getComputedStyle(document.querySelector('.shop-grid')).gridTemplateColumns.split(' ').length,
+                columns:Math.round(document.querySelector('.shop-grid').getBoundingClientRect().width/card.getBoundingClientRect().width),
                 bannerHeight:document.querySelector('.shop-banner').getBoundingClientRect().height,
                 primaryOpacity:Number(getComputedStyle(card.querySelector('.is-primary')).opacity),
                 overflow:document.documentElement.scrollWidth > innerWidth,
@@ -1821,22 +1997,160 @@ try:
     """)
     expect(theme_state["accent"].lower() == theme["theme"]["accentColor"].lower() and theme_state["previewCards"] > 0 and theme_state["publishEnabled"], "Theme controls did not load or preview correctly")
 
-    cdp.evaluate("document.querySelector('[data-admin-module=\"settings\"]').click()")
-    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"settings\"]').hidden")
-    settings_state = cdp.evaluate("""
+    cdp.evaluate("document.querySelector('[data-admin-module=\"brand\"]').click()")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"brand\"]').hidden && document.querySelector('[data-brand-message]').textContent.includes('loaded')")
+    brand_admin_state = cdp.evaluate("""
         (() => {
-            const form=document.querySelector('#social-form');
-            form.elements.instagram.value='https://instagram.com/dyndel-browser-test';
-            form.requestSubmit();
-            const saved=JSON.parse(localStorage.getItem('dyndelSocials') || '{}');
+            const form=document.querySelector('#brand-form');
             return {
-                fieldCount:form.querySelectorAll('input[type="url"]').length,
-                savedInstagram:saved.instagram || ''
+                name:form.elements.brandName.value,
+                color:form.elements.brandNameColor.value,
+                fontSelectors:form.querySelectorAll('select[name$="Font"]').length,
+                pointerBrush:form.elements.pointerBrushEnabled.value,
+                socialFields:form.querySelectorAll('input[type="url"]').length,
+                logoLoaded:document.querySelector('[data-brand-logo-preview] img').complete,
+                iconLoaded:document.querySelector('[data-brand-icon-preview]').complete,
+                neutral:getComputedStyle(document.querySelector('.cms-topbar')).backgroundColor,
+                publicEffects:document.querySelectorAll('.pointer-canvas, .contact-mascot').length,
+                overflow:document.documentElement.scrollWidth>innerWidth
             };
         })()
     """)
-    expect(settings_state == {"fieldCount": 4, "savedInstagram": "https://instagram.com/dyndel-browser-test"}, "Settings social-link form did not save in the disposable browser profile")
-    checks += 25
+    expect(brand_admin_state["name"] == initial_brand["brandName"] and brand_admin_state["color"].lower() == initial_brand["brandNameColor"].lower() and brand_admin_state["fontSelectors"] == 4 and brand_admin_state["pointerBrush"] == ("1" if initial_pointer_brush_enabled else "0") and brand_admin_state["socialFields"] == 4 and brand_admin_state["logoLoaded"] and brand_admin_state["iconLoaded"] and brand_admin_state["publicEffects"] == 0 and not brand_admin_state["overflow"], "Admin Brand Identity did not load completely in the neutral CMS: " + json.dumps(brand_admin_state))
+    brand_preview_state = cdp.evaluate("""
+        (() => {
+            const form=document.querySelector('#brand-form');
+            form.elements.brandName.value='Preview Brand';
+            form.elements.brandName.dispatchEvent(new Event('input',{bubbles:true}));
+            form.querySelector('[data-brand-color-hex]').value='#245F4B';
+            form.querySelector('[data-brand-color-hex]').dispatchEvent(new Event('input',{bubbles:true}));
+            return {text:document.querySelector('[data-brand-text-preview]').textContent,color:form.elements.brandNameColor.value,saveText:form.querySelector('[data-brand-save]').textContent};
+        })()
+    """)
+    expect(brand_preview_state == {"text": "Preview Brand", "color": "#245f4b", "saveText": "Save Brand Settings"}, "Admin Brand preview or accessible color controls did not respond")
+    capture_screenshot(cdp, "global-brand-admin-1440.png")
+    checks += 27
+
+    brand_browser_name = "Browser GIF Brand " + token
+    brand_browser_fields = {
+        "brandName": brand_browser_name,
+        "brandNameColor": "#245f4b",
+        "brandFont": "nunito",
+        "headingFont": "georgia",
+        "bodyFont": "system-sans",
+        "uiFont": "georgia",
+        "pointerBrushEnabled": "0",
+        "instagram": "https://instagram.com/dyndel-browser-" + token,
+        "facebook": "",
+        "twitter": "",
+        "youtube": "",
+    }
+    cdp.evaluate("""
+        (() => {
+            window.__brandSaveResponses=[];
+            window.__brandSaveFetch=window.fetch.bind(window);
+            window.fetch=async (...args)=>{
+                const response=await window.__brandSaveFetch(...args);
+                if(String(args[0]).includes('action=save-brand')){
+                    const raw=await response.clone().text();
+                    window.__brandSaveResponses.push({status:response.status,contentType:response.headers.get('content-type')||'',raw});
+                }
+                return response;
+            };
+        })()
+    """)
+
+    def submit_brand_browser(logo_path=None, icon_path=None, timeout=20):
+        response_count = cdp.evaluate("window.__brandSaveResponses.length")
+        cdp.evaluate(f"""
+            (() => {{
+                const form=document.querySelector('#brand-form');
+                const fields={js_string(brand_browser_fields)};
+                Object.entries(fields).forEach(([name,value])=>{{form.elements[name].value=value;}});
+                form.querySelector('[data-brand-color-hex]').value=fields.brandNameColor.toUpperCase();
+                form.elements.textLogoOnly.checked=false;
+                form.elements.logoFile.value='';
+                form.elements.iconFile.value='';
+            }})()
+        """)
+        if logo_path:
+            set_file_input(cdp, '#brand-form input[name="logoFile"]', logo_path)
+        if icon_path:
+            set_file_input(cdp, '#brand-form input[name="iconFile"]', icon_path)
+        cdp.evaluate("document.querySelector('#brand-form').requestSubmit()")
+        cdp.wait_for(f"window.__brandSaveResponses.length === {response_count + 1} && !document.querySelector('[data-brand-save]').disabled", timeout)
+        return cdp.evaluate("window.__brandSaveResponses.at(-1)")
+
+    brand_restore_required = True
+    settings_response = submit_brand_browser()
+    settings_json = json.loads(settings_response["raw"])
+    expect(settings_response["status"] == 200 and settings_response["contentType"].lower().startswith("application/json") and settings_json["brand"]["brandName"] == brand_browser_name and settings_json["brand"]["logoPath"] == initial_brand["logoPath"] and settings_json["brand"]["siteIconPath"] == initial_brand["siteIconPath"], "Real Admin settings-only Brand save failed: " + json.dumps(settings_response))
+
+    logo_response = submit_brand_browser(logo_path=source_gif.name)
+    logo_json = json.loads(logo_response["raw"])
+    brand_uploaded_test_paths.append(logo_json["brand"]["logoPath"])
+    expect(logo_response["status"] == 200 and logo_response["contentType"].lower().startswith("application/json") and logo_json["brand"]["logoPath"].endswith(".gif") and logo_json["brand"]["siteIconPath"] == initial_brand["siteIconPath"], "Real Admin GIF logo-only save failed: " + json.dumps(logo_response))
+
+    icon_response = submit_brand_browser(icon_path=source_gif.name)
+    icon_json = json.loads(icon_response["raw"])
+    brand_uploaded_test_paths.append(icon_json["brand"]["siteIconPath"])
+    expect(icon_response["status"] == 200 and icon_response["contentType"].lower().startswith("application/json") and icon_json["brand"]["siteIconPath"].endswith(".gif") and icon_json["brand"]["logoPath"] == logo_json["brand"]["logoPath"], "Real Admin GIF favicon-only save failed: " + json.dumps(icon_response))
+
+    both_response = submit_brand_browser(logo_path=source_gif.name, icon_path=source_gif.name)
+    both_json = json.loads(both_response["raw"])
+    brand_uploaded_test_paths.extend([both_json["brand"]["logoPath"], both_json["brand"]["siteIconPath"]])
+    both_paths_exist = all(os.path.isfile(os.path.join(ROOT, *path.split('/'))) for path in [both_json["brand"]["logoPath"], both_json["brand"]["siteIconPath"]])
+    preview_after_save = cdp.evaluate("({name:document.querySelector('#brand-form').elements.brandName.value,logo:new URL(document.querySelector('[data-brand-logo-preview] img').src).pathname,icon:new URL(document.querySelector('[data-brand-icon-preview]').src).pathname,message:document.querySelector('[data-brand-message]').textContent})")
+    expect(both_response["status"] == 200 and both_response["contentType"].lower().startswith("application/json") and both_json["brand"]["logoPath"].endswith(".gif") and both_json["brand"]["siteIconPath"].endswith(".gif") and both_paths_exist and preview_after_save["name"] == brand_browser_name and preview_after_save["logo"].endswith(both_json["brand"]["logoPath"]) and preview_after_save["icon"].endswith(both_json["brand"]["siteIconPath"]) and "saved" in preview_after_save["message"].lower(), "Real Admin combined GIF save or preview update failed: " + json.dumps({"response": both_response, "preview": preview_after_save}))
+
+    oversized_path = os.path.join(ROOT, "img", "messenger.gif")
+    oversized_response = submit_brand_browser(logo_path=oversized_path, icon_path=oversized_path, timeout=60)
+    oversized_json = json.loads(oversized_response["raw"])
+    oversized_ui = cdp.evaluate("document.querySelector('[data-brand-message]').textContent")
+    expect(oversized_response["status"] == 413 and oversized_response["contentType"].lower().startswith("application/json") and "too large" in oversized_json["error"].lower() and "too large" in oversized_ui.lower() and "Unexpected token" not in oversized_ui, "Oversized real Admin GIF request did not return a graceful JSON rejection: " + json.dumps({"response": oversized_response, "ui": oversized_ui}))
+
+    propagation_routes = [
+        ("home", "index.html"),
+        ("store", "store.html"),
+        ("product", "store.html?product=" + urllib.parse.quote(initial_public_products[0]["slug"])),
+        ("stories", "stories.php"),
+        ("checkout", "checkout.html"),
+    ]
+    propagation_states = []
+    for label, route in propagation_routes:
+        cdp.navigate(BASE + route)
+        cdp.wait_for("Boolean(document.querySelector('.footer-groups'))", 15)
+        cdp.wait_for("document.querySelector('.logo-wrap img')?.complete && document.querySelector('.logo-wrap img').naturalWidth > 0", 15)
+        state = cdp.evaluate(f"""
+            (() => {{
+                const root=getComputedStyle(document.documentElement);
+                const logo=document.querySelector('.logo-wrap img');
+                return {{
+                    route:{js_string(label)},brand:document.querySelector('.brand').textContent,
+                    logo:new URL(logo.src).pathname,logoLoaded:logo.complete&&logo.naturalWidth>0,
+                    icon:new URL(document.querySelector('link[rel~="icon"]').href).pathname,
+                    color:root.getPropertyValue('--brand-name-color').trim(),brandFont:root.getPropertyValue('--font-brand').trim(),
+                    headingFont:root.getPropertyValue('--font-heading').trim(),bodyFont:root.getPropertyValue('--font-body').trim(),uiFont:root.getPropertyValue('--font-ui').trim(),
+                    footer:document.querySelector('.footer-brand-name').textContent,socials:document.querySelectorAll('.footer-social-link').length,
+                    pointer:document.querySelectorAll('.pointer-canvas').length,overflow:document.documentElement.scrollWidth>innerWidth
+                }};
+            }})()
+        """)
+        propagation_states.append(state)
+        capture_screenshot(cdp, f"brand-gif-propagation-{label}.png")
+    expect(all(state["brand"] == brand_browser_name and state["logo"].endswith(both_json["brand"]["logoPath"]) and state["logoLoaded"] and state["icon"].endswith(both_json["brand"]["siteIconPath"]) and state["color"] == "#245f4b" and "Nunito" in state["brandFont"] and "Georgia" in state["headingFont"] and "system-ui" in state["bodyFont"] and "Georgia" in state["uiFont"] and state["footer"] == brand_browser_name and state["socials"] == 1 and state["pointer"] == 0 and not state["overflow"] for state in propagation_states), "Saved Brand Identity did not propagate across public routes: " + json.dumps(propagation_states))
+    checks += 6
+
+    restore_brand_identity(initial_brand)
+    brand_restore_required = False
+    for uploaded_path in list(brand_uploaded_test_paths):
+        disk_path = os.path.abspath(os.path.join(ROOT, *uploaded_path.split('/')))
+        brand_root = os.path.abspath(os.path.join(ROOT, "img", "projectfolder", "brand"))
+        if os.path.commonpath([disk_path, brand_root]) == brand_root and os.path.isfile(disk_path):
+            os.remove(disk_path)
+    brand_uploaded_test_paths.clear()
+    cdp.navigate(BASE + "admin.html")
+    cdp.wait_for("!document.querySelector('#admin-content').hidden", 15)
 
     cdp.call("Network.deleteCookies", {"name": "PHPSESSID", "url": BASE})
     cdp.evaluate("sessionStorage.setItem('dyndelAdminSession','authenticated'); location.reload()")
@@ -1902,11 +2216,16 @@ try:
     cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"content\"]').hidden && document.querySelectorAll('#content-list .cms-content-row').length > 0", 15)
     expect(cdp.evaluate("!document.querySelector('[data-content-management]').hidden && document.querySelector('[data-content-editor]').hidden && document.documentElement.scrollWidth <= innerWidth"), "Mobile Content did not open management-first without overflow")
     capture_screenshot(cdp, "admin-v2-content-390.png")
+    cdp.evaluate("document.querySelector('[data-admin-module=\"brand\"]').click()")
+    cdp.wait_for("!document.querySelector('[data-admin-module-panel=\"brand\"]').hidden && document.querySelector('[data-brand-message]').textContent.includes('loaded')", 15)
+    mobile_brand = cdp.evaluate("({columns:getComputedStyle(document.querySelector('.cms-brand-media-grid')).gridTemplateColumns.split(' ').length,fonts:getComputedStyle(document.querySelector('.cms-brand-font-grid')).gridTemplateColumns.split(' ').length,saveHeight:document.querySelector('[data-brand-save]').getBoundingClientRect().height,overflow:document.documentElement.scrollWidth>innerWidth})")
+    expect(mobile_brand["columns"] == 1 and mobile_brand["fonts"] == 1 and mobile_brand["saveHeight"] >= 40 and not mobile_brand["overflow"], "Mobile Admin Brand Identity did not stack accessibly: " + json.dumps(mobile_brand))
+    capture_screenshot(cdp, "global-brand-admin-390.png")
     cdp.evaluate("document.querySelector('[data-admin-module=\"shop\"]').click()")
     cdp.evaluate(f"document.querySelector('[data-edit-product=\"{v2_id}\"]').click()")
     mobile_admin = cdp.evaluate("({products:document.querySelectorAll('#product-list .cms-product-row').length, panelHidden:document.querySelector('[data-admin-module-panel=\"shop\"]').hidden, width:innerWidth, images:document.querySelectorAll('.cms-product-image-item').length, role:document.querySelector('.cms-product-image-role')?.textContent || ''})")
     expect(mobile_admin == {"products": admin_fixture_count, "panelHidden": False, "width": 390, "images": 1, "role": "Primary"}, "Mobile Admin Shop/gallery regression failed")
-    checks += 4
+    checks += 5
     capture_screenshot(cdp, "shop-admin-b4-mobile.png")
 
     # Shop F2 Checkout V1: customer flow, server quote hydration, pending handoff,
@@ -2079,7 +2398,7 @@ try:
                 description:document.querySelector('meta[name="description"]')?.content || '',
                 storeCurrent:document.querySelector('.nav [data-nav-section="store"]').getAttribute('aria-current'),
                 policyLinks:[...document.querySelectorAll('.policy-nav a')].map(link=>link.getAttribute('href')),
-                footerLinks:[...document.querySelectorAll('.footer-policy-nav a')].map(link=>link.getAttribute('href')),
+                footerLinks:[...document.querySelectorAll('.footer-policy-nav a')].map(link=>new URL(link.href).pathname.split('/').pop()),
                 currentPolicies:document.querySelectorAll('.policy-nav [aria-current="page"]').length,
                 updated:document.querySelector('time[datetime="2026-10-06"]')?.textContent || '',
                 overflow:document.documentElement.scrollWidth > innerWidth,
@@ -2135,11 +2454,11 @@ try:
                 heading:document.querySelector('h1').textContent,
                 columns:getComputedStyle(document.querySelector('.policy-layout')).gridTemplateColumns.split(' ').length,
                 navWrap:getComputedStyle(document.querySelector('.policy-nav')).flexWrap,
-                footerWrap:getComputedStyle(document.querySelector('.footer-policy-nav')).flexWrap,
+                footerDisplay:getComputedStyle(document.querySelector('.footer-policy-nav')).display,
                 overflow:document.documentElement.scrollWidth > innerWidth
             }))()
         """)
-        expect(mobile_policy == {"heading": heading, "columns": 1, "navWrap": "wrap", "footerWrap": "wrap", "overflow": False}, "Mobile policy layout failed for " + route + ": " + json.dumps(mobile_policy))
+        expect(mobile_policy == {"heading": heading, "columns": 1, "navWrap": "wrap", "footerDisplay": "grid", "overflow": False}, "Mobile policy layout failed for " + route + ": " + json.dumps(mobile_policy))
         checks += 1
     cdp.evaluate("document.querySelector('.menu-toggle').click()")
     expect(cdp.evaluate("document.querySelector('.nav').classList.contains('open') && document.querySelector('.nav [data-nav-section=\"store\"]').getAttribute('aria-current') === 'page'") is True, "Mobile navigation or Store context failed on a policy route")
@@ -2151,6 +2470,11 @@ try:
     expect(not cdp.runtime_errors, "Browser JavaScript errors occurred: " + "; ".join(cdp.runtime_errors))
     checks += 1
 finally:
+    if brand_restore_required:
+        try:
+            restore_brand_identity(initial_brand)
+        except Exception:
+            pass
     for content_id in list(content_fixture_ids):
         try:
             api_request("delete-content", "POST", {"id": content_id}, session_id)
@@ -2198,9 +2522,19 @@ finally:
         disk_path = os.path.abspath(os.path.join(ROOT, *uploaded_path.split("/")))
         if os.path.commonpath([disk_path, shop_media_root]) == shop_media_root and os.path.isfile(disk_path):
             os.remove(disk_path)
+    brand_media_root = os.path.abspath(os.path.join(ROOT, "img", "projectfolder", "brand"))
+    for uploaded_path in brand_uploaded_test_paths:
+        if not re.fullmatch(r"img/projectfolder/brand/[0-9a-f]{32}\.(?:jpg|png|gif|webp)", uploaded_path):
+            continue
+        disk_path = os.path.abspath(os.path.join(ROOT, *uploaded_path.split("/")))
+        if os.path.commonpath([disk_path, brand_media_root]) == brand_media_root and os.path.isfile(disk_path):
+            os.remove(disk_path)
     source_path = os.path.abspath(source_image.name)
     if os.path.commonpath([source_path, os.path.abspath(tempfile.gettempdir())]) == os.path.abspath(tempfile.gettempdir()) and os.path.isfile(source_path):
         os.remove(source_path)
+    source_gif_path = os.path.abspath(source_gif.name)
+    if os.path.commonpath([source_gif_path, os.path.abspath(tempfile.gettempdir())]) == os.path.abspath(tempfile.gettempdir()) and os.path.isfile(source_gif_path):
+        os.remove(source_gif_path)
 
 status, final_admin = api_request("admin-products", session_id=None)
 expect(status == 401, "Browser test session remained authenticated after logout")
