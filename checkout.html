@@ -142,15 +142,17 @@
                     <small>Review the Store policies before continuing.</small>
                 </div>
                 <button class="btn btn-primary checkout-submit" type="submit" data-checkout-submit disabled>CONTINUE TO PAYMENT</button>
+                <p data-card-payment-method hidden>Credit / Debit Card</p>
             </aside>
         </form>
 
         <section class="checkout-handoff" data-checkout-handoff tabindex="-1" hidden>
             <p class="eyebrow">Payment boundary</p>
             <h2>Order prepared.</h2>
-            <p>Payment integration will be added in the next milestone.</p>
+            <p data-payment-handoff-message>Credit / Debit Card is currently unavailable. Your order remains unpaid.</p>
             <p class="checkout-handoff-detail">This order is pending and unpaid. Your Cart has not been cleared.</p>
             <a class="btn btn-secondary" href="store.html">Return to Store</a>
+            <button type="button" class="btn btn-primary" data-payment-handoff-retry>Retry payment</button>
         </section>
     </main>
 
@@ -162,6 +164,6 @@
             </nav>
         </div>
     </footer>
-    <script src="script.js?v=20261006.shopf3"></script>
+    <script src="script.js?v=20261007.shop-g3"></script>
 </body>
 </html>

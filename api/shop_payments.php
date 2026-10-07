@@ -61,12 +61,13 @@ function shop_payment_lock_order(PDO $pdo, int $orderId): array
  * Reusing a reference returns the same attempt; retries need a NEW reference
  * after a terminal failure/cancellation. No historical payment backfill.
  */
-function shop_payment_create(PDO $pdo, int $orderId, string $provider, string $attemptReference, ?string $providerSessionId = null): array
+function shop_payment_create(PDO $pdo, int $orderId, string $provider, string $attemptReference, ?string $providerSessionId = null, ?string $providerMode = null): array
 {
     shop_payment_provider($provider);
     shop_payment_identifier($attemptReference, 64);
     if ($providerSessionId !== null) shop_payment_identifier($providerSessionId);
-    return shop_payment_transaction($pdo, static function () use ($pdo, $orderId, $provider, $attemptReference, $providerSessionId): array {
+    if ($providerMode !== null && !in_array($providerMode,['test','live'],true)) throw new DomainException('Invalid payment mode.');
+    return shop_payment_transaction($pdo, static function () use ($pdo, $orderId, $provider, $attemptReference, $providerSessionId,$providerMode): array {
         $order = shop_payment_lock_order($pdo, $orderId);
         // Legacy orders remain readable but cannot enter a new payment flow.
         if ($order['order_origin'] !== 'checkout_v2' || $order['currency'] !== SHOP_CURRENCY) {
@@ -78,7 +79,8 @@ function shop_payment_create(PDO $pdo, int $orderId, string $provider, string $a
         $payment = $existing->fetch(PDO::FETCH_ASSOC);
         if ($payment) {
             if ((int)$payment['order_id'] !== $orderId || $payment['amount'] !== $order['total']
-                || $payment['currency'] !== $order['currency'] || $payment['provider_session_id'] !== $providerSessionId) {
+                || $payment['currency'] !== $order['currency'] || $payment['provider_session_id'] !== $providerSessionId
+                || $payment['provider_mode'] !== $providerMode) {
                 throw new DomainException('Payment reference was already used with different details.');
             }
             return $payment;
@@ -89,8 +91,8 @@ function shop_payment_create(PDO $pdo, int $orderId, string $provider, string $a
         $pending = $pdo->prepare("SELECT id FROM shop_payments WHERE order_id = ? AND status IN ('pending','paid') LIMIT 1");
         $pending->execute([$orderId]);
         if ($pending->fetchColumn()) throw new DomainException('Order already has an active or paid payment attempt.');
-        $insert = $pdo->prepare('INSERT INTO shop_payments (order_id, provider, attempt_reference, provider_session_id, amount, currency) VALUES (?, ?, ?, ?, ?, ?)');
-        $insert->execute([$orderId, $provider, $attemptReference, $providerSessionId, $order['total'], $order['currency']]);
+        $insert = $pdo->prepare('INSERT INTO shop_payments (order_id, provider, attempt_reference, provider_session_id, amount, currency,provider_mode) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([$orderId, $provider, $attemptReference, $providerSessionId, $order['total'], $order['currency'],$providerMode]);
         $select = $pdo->prepare('SELECT * FROM shop_payments WHERE id = ?');
         $select->execute([(int)$pdo->lastInsertId()]);
         return $select->fetch(PDO::FETCH_ASSOC);

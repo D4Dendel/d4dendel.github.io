@@ -256,7 +256,7 @@
                 <section class="cms-module" data-admin-module-panel="payments" hidden>
                     <div class="cms-page-heading"><div><span class="cms-kicker">Commerce</span><h1>Payment Providers</h1><p>Manage provider settings for future customer payments.</p></div></div>
                     <p class="cms-payment-currency">Store Currency: <strong>USD</strong></p>
-                    <p class="cms-note">PayPal and Stripe integrations are pending. Customer payments remain off.</p>
+                    <p class="cms-note">Credit / Debit Card uses Stripe Test only. PayPal integration is pending. Providers are enabled manually.</p>
                     <p class="cms-note" data-payments-message role="status" aria-live="polite"></p>
                     <div class="cms-payment-provider-grid" data-payment-providers></div>
                     <section class="cms-editor cms-payment-editor" data-payment-editor hidden aria-labelledby="payment-provider-editor-title">
@@ -267,7 +267,7 @@
                             <label><span>Mode</span><select name="mode"><option value="test">Test</option><option value="live">Live</option></select></label>
                             <p class="cms-note" data-payment-server-status></p>
                             <p class="cms-note">Credentials are configured manually through server environment variables or protected api/config.php. Test and Live use separate credentials. Secret values are never entered or shown here.</p>
-                            <p class="cms-note">Enabling a setting does not connect a provider. Customer availability also requires server credentials and an implemented integration.</p>
+                            <p class="cms-note">Availability requires server credentials and an implemented integration. Stripe supports Test only; Live payments are unavailable.</p>
                             <button type="submit" class="cms-button cms-button-primary">Save settings</button>
                         </form>
                     </section>
@@ -352,6 +352,6 @@
         </div>
     </main>
 
-    <script src="script.js?v=20261007.shop-g2"></script>
+    <script src="script.js?v=20261007.shop-g3"></script>
 </body>
 </html>

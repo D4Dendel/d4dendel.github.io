@@ -362,9 +362,10 @@ source_gif.close()
 auto_result = subprocess.run([
     MYSQL, "--host=127.0.0.1", "--user=root", "--batch", "--skip-column-names",
     "--database=dyndel_portfolio",
-    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges','shop_orders','shop_order_items','shop_shipping_zones','shop_shipping_methods','content_entries','content_blocks') ORDER BY TABLE_NAME;",
+    "--execute=SELECT TABLE_NAME, COALESCE(AUTO_INCREMENT, 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('shop_products','shop_product_images','shop_product_badges','shop_orders','shop_order_items','shop_payments','shop_payment_events','shop_shipping_zones','shop_shipping_methods','content_entries','content_blocks') ORDER BY TABLE_NAME;",
 ], check=True, capture_output=True, text=True)
 initial_auto_increments = dict(line.split("\t", 1) for line in auto_result.stdout.splitlines() if line)
+initial_order_max = int(mysql_value("SELECT COALESCE(MAX(id),0) FROM shop_orders;"))
 
 subprocess.run([
     PHP,
@@ -405,6 +406,10 @@ def restore_provider_settings():
                     + " WHERE provider=" + mysql_text_literal(provider["key"]) + ";")
 
 try:
+    # Keep browser fixtures network-free even after local sandbox acceptance.
+    # Restore the user's exact settings (including timestamps) in finally.
+    provider_settings_restore_required = True
+    mysql_value("UPDATE shop_payment_providers SET enabled=0;")
     chrome, websocket_url = start_chrome(profile)
     cdp = CdpClient(websocket_url)
     for method in ("Page.enable", "Runtime.enable", "Log.enable", "Network.enable"):
@@ -2157,7 +2162,7 @@ try:
                 controlVisible:f.elements.enabled.getBoundingClientRect().top>=0 && f.elements.enabled.getBoundingClientRect().bottom<=innerHeight,
                 fields:[...f.elements].filter(n=>n.name).map(n=>n.name),
                 overflow:document.documentElement.scrollWidth>innerWidth}; })()""")
-            expect(editor == {"open": True, "provider": provider["key"], "enabled": "1" if provider["enabled"] else "0", "mode": provider["mode"], "focused": True, "controlVisible": True, "fields": ["provider", "enabled", "mode"], "overflow": False}, "Provider editor was incorrect: " + json.dumps(editor))
+            expect(editor == {"open": True, "provider": provider["key"], "enabled": "0", "mode": provider["mode"], "focused": True, "controlVisible": True, "fields": ["provider", "enabled", "mode"], "overflow": False}, "Provider editor was incorrect: " + json.dumps(editor))
             capture_screenshot(cdp, f"shop-g2-configure-{provider['key']}-{width}.png")
             cdp.evaluate("document.querySelector('[data-payment-editor-close]').click()")
             expect(cdp.evaluate("document.querySelector('[data-payment-editor]').hidden && document.activeElement.matches('[data-configure-payment-provider]')"), "Close did not return focus to Configure")
@@ -2175,7 +2180,9 @@ try:
     cdp.evaluate("document.querySelector('[data-admin-module=\"payments\"]').click(); document.querySelector('[data-configure-payment-provider=\"paypal\"]').click()")
     expect(cdp.evaluate("document.querySelector('#payment-provider-form').elements.mode.value === 'live' && document.querySelector('#payment-provider-form').elements.enabled.value === '1'"), "Payment settings did not persist across reload")
     restore_provider_settings()
-    provider_settings_restore_required = False
+    # Checkout fixtures below must not open real Stripe sessions.
+    mysql_value("UPDATE shop_payment_providers SET enabled=0;")
+    provider_settings_restore_required = True
     cdp.evaluate("document.querySelector('[data-payment-editor-close]').click()")
     cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
     checks += 3
@@ -2523,9 +2530,36 @@ try:
         cdp.wait_for("!document.querySelector('[data-checkout-handoff]').hidden", 15)
         handoff = cdp.evaluate("({heading:document.querySelector('[data-checkout-handoff] h2').textContent,copy:document.querySelector('[data-checkout-handoff]').textContent,cart:JSON.parse(localStorage.getItem('dyndelShopCart')),focused:document.activeElement === document.querySelector('[data-checkout-handoff]'),orderId:Number(document.querySelector('[data-checkout-handoff]').dataset.orderId)})")
         checkout_order_id = handoff["orderId"]
-        expect(handoff["heading"] == "Order prepared." and "Payment integration will be added" in handoff["copy"] and "pending and unpaid" in handoff["copy"] and handoff["cart"] == [{"id": 1, "quantity": 1}] and handoff["focused"], "Payment-boundary handoff, focus, or Cart preservation failed")
+        expect(handoff["heading"] == "Order prepared." and "Credit / Debit Card" in handoff["copy"] and "pending and unpaid" in handoff["copy"] and handoff["cart"] == [{"id": 1, "quantity": 1}] and handoff["focused"], "Payment-boundary handoff, focus, or Cart preservation failed")
         order_state = mysql_value(f"SELECT CONCAT(order_origin,':',status,':',payment_status,':',total) FROM shop_orders WHERE id={checkout_order_id};")
         expect(order_state == "checkout_v2:pending:unpaid:30.00" and mysql_value("SELECT stock FROM shop_products WHERE id=1;") == "12", "Browser handoff order lifecycle or stock safety failed")
+
+        checkout_fixture_token = cdp.evaluate("JSON.parse(sessionStorage.getItem('dyndelCheckoutAttemptToken')).token")
+        cdp.navigate(BASE + f"payment-return.html?outcome=success&order={checkout_order_id}")
+        cdp.wait_for("document.querySelector('[data-payment-return-status]').textContent.includes('Confirming')", 10)
+        expect(cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))") == [{"id": 1, "quantity": 1}], "Success redirect cleared an unpaid Cart")
+        expect(mysql_value(f"SELECT payment_status FROM shop_orders WHERE id={checkout_order_id};") == "unpaid", "Success redirect marked order Paid")
+        capture_screenshot(cdp, "shop-g3-return-pending-1440.png", full_page=False)
+        cdp.navigate(BASE + f"payment-return.html?outcome=cancel&order={checkout_order_id}")
+        cdp.wait_for("document.querySelector('[data-payment-return-status]').textContent.includes('not completed')", 10)
+        expect(cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))") == [{"id": 1, "quantity": 1}], "Cancel redirect cleared a Cart")
+        expect(mysql_value(f"SELECT payment_status FROM shop_orders WHERE id={checkout_order_id};") == "unpaid", "Cancel redirect marked order Paid")
+        cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:1,quantity:2}},{{id:{checkout_digital_id},quantity:1}}]))")
+        subprocess.run([PHP, os.path.join(ROOT, "tests", "stripe_browser_fixture.php"), str(checkout_order_id), str(initial_order_max), checkout_fixture_token], check=True, capture_output=True, text=True)
+        cdp.navigate(BASE + f"payment-return.html?outcome=success&order={checkout_order_id}")
+        cdp.wait_for("document.querySelector('[data-payment-return-status]').textContent.includes('Payment received') && Boolean(localStorage.getItem('dyndelPaidCartCleared:'+new URLSearchParams(location.search).get('order')))", 10)
+        remaining_cart = [{"id": 1, "quantity": 1}, {"id": checkout_digital_id, "quantity": 1}]
+        expect(cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))") == remaining_cart, "Paid return removed unrelated/new Cart quantities")
+        expect(mysql_value("SELECT stock FROM shop_products WHERE id=1;") == "12", "Verified payment changed stock")
+        capture_screenshot(cdp, "shop-g3-return-paid-1440.png", full_page=False)
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True})
+        cdp.navigate(BASE + f"payment-return.html?outcome=success&order={checkout_order_id}")
+        cdp.wait_for("document.querySelector('[data-payment-return-status]').textContent.includes('Payment received')", 10)
+        expect(cdp.evaluate("JSON.parse(localStorage.getItem('dyndelShopCart'))") == remaining_cart, "Repeated Paid return cleared Cart twice")
+        expect(cdp.evaluate("document.documentElement.scrollWidth<=innerWidth"), "Mobile payment return overflowed")
+        capture_screenshot(cdp, "shop-g3-return-paid-390.png", full_page=False)
+        cdp.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+        checks += 8
 
         cdp.evaluate(f"localStorage.setItem('dyndelShopCart',JSON.stringify([{{id:{checkout_digital_id},quantity:1}}])); location.href='checkout.html'")
         cdp.wait_for("!document.querySelector('[data-checkout-form]').hidden && document.querySelector('[data-checkout-total]').textContent === '$7.00'", 15)
@@ -2573,6 +2607,8 @@ try:
         checks += 15
     finally:
         if checkout_order_id:
+            mysql_value(f"DELETE FROM shop_payment_events WHERE order_id={checkout_order_id};")
+            mysql_value(f"DELETE FROM shop_payments WHERE order_id={checkout_order_id};")
             mysql_value(f"DELETE FROM shop_orders WHERE id={checkout_order_id};")
         if checkout_digital_id:
             if checkout_digital_id in fixture_ids:

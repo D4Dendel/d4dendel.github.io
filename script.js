@@ -3245,7 +3245,7 @@ paymentProviderForm?.addEventListener('submit', async (event) => {
     renderPaymentProviderSettings();
     document.querySelector('[data-payment-server-status]').textContent = result.provider.configured
       ? 'Server credentials configured' : 'Server credentials not configured';
-    setPaymentsMessage('Settings saved. Customer payments remain off while integrations are pending.');
+    setPaymentsMessage(result.provider.available ? 'Settings saved. Credit / Debit Card is available in Test mode.' : 'Settings saved. This provider is unavailable to customers.');
   } catch (error) {
     setPaymentsMessage(error.message, true);
   } finally {
@@ -4203,6 +4203,43 @@ if (checkoutPage && checkoutForm) {
   let quoteController = null;
   let checkoutSubmitting = false;
   let reviewedQuoteFingerprint = '';
+  let preparedPayment = null;
+  const cardAvailable = async () => {
+    try {
+      const result = await cmsRequest('payment-providers');
+      const available = result.providers.some((provider) => provider.key === 'stripe' && provider.mode === 'test');
+      const method = document.querySelector('[data-card-payment-method]');
+      if (method) method.hidden = !available;
+      return available;
+    } catch (error) { return false; }
+  };
+  const continuePreparedPayment = async () => {
+    if (!preparedPayment) return;
+    const message = document.querySelector('[data-payment-handoff-message]');
+    const retry = document.querySelector('[data-payment-handoff-retry]');
+    retry.disabled = true;
+    try {
+      if (!await cardAvailable()) {
+        message.textContent = 'Credit / Debit Card is currently unavailable. Your order remains pending and unpaid. Your Cart is unchanged.';
+        return;
+      }
+      message.textContent = 'Opening secure card payment…';
+      const response = await cmsRequest('stripe-checkout-session', { method: 'POST', body: new URLSearchParams({
+        orderId: String(preparedPayment.orderId), csrfToken: preparedPayment.csrfToken
+      }) });
+      if (response.session.alreadyPaid) {
+        window.location.assign(`payment-return.html?order=${preparedPayment.orderId}`);
+        return;
+      }
+      const destination = new URL(response.session.url);
+      if (destination.protocol !== 'https:' || destination.hostname !== 'checkout.stripe.com' || destination.username || destination.password || destination.port) throw new Error('The payment destination could not be verified.');
+      window.location.assign(destination.href);
+    } catch (error) {
+      message.textContent = error.message || 'Payment could not be opened. Your order remains unpaid and your Cart is unchanged.';
+    } finally { retry.disabled = false; }
+  };
+  document.querySelector('[data-payment-handoff-retry]')?.addEventListener('click', continuePreparedPayment);
+  cardAvailable();
 
   const checkoutCountryCodes = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW`.split(' ');
   const regionNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
@@ -4450,11 +4487,17 @@ if (checkoutPage && checkoutForm) {
       }
       setCheckoutStatus('Preparing your pending order…', 'loading');
       const result = await cmsRequest('checkout-order', { method: 'POST', body: request });
+      preparedPayment = { orderId: result.order.id, csrfToken: result.paymentCsrfToken };
+      sessionStorage.setItem(`dyndelPaymentContext:${result.order.id}`, JSON.stringify(preparedPayment));
+      if (!sessionStorage.getItem(`dyndelPaymentCart:${result.order.id}`)) {
+        sessionStorage.setItem(`dyndelPaymentCart:${result.order.id}`, JSON.stringify(checkoutCartPayload()));
+      }
       checkoutForm.hidden = true;
       handoff.hidden = false;
       handoff.dataset.orderId = String(result.order.id);
       setCheckoutStatus(`Order ${result.order.id} is prepared and remains unpaid.`, 'ready');
       handoff.focus();
+      await continuePreparedPayment();
     } catch (error) {
       showCheckoutError(error.message || 'The order could not be prepared. Please try again.', true);
       setCheckoutStatus('The order was not prepared.', 'error');

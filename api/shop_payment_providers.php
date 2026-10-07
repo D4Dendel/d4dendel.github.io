@@ -21,9 +21,14 @@ final class ShopVerifiedProviderResult
         public readonly string $amount,
         public readonly string $currency,
         public readonly ?string $captureId = null,
-        public readonly ?string $failureCode = null
+        public readonly ?string $failureCode = null,
+        public readonly ?string $sessionId = null,
+        public readonly ?string $providerMode = null,
+        public readonly ?int $orderId = null
     ) {}
 }
+
+require_once __DIR__ . '/stripe_test_adapter.php';
 
 /** Deliberately dormant: no SDK, requests, transactions or callback verification. */
 final class ShopUnconnectedProviderAdapter implements ShopPaymentProviderAdapter
@@ -43,7 +48,7 @@ final class ShopPaymentProviderRegistry
 {
     private const PROVIDERS = [
         'paypal' => ['name' => 'PayPal', 'fields' => ['client_id','client_secret','webhook_id']],
-        'stripe' => ['name' => 'Stripe', 'fields' => ['publishable_key','secret_key','webhook_secret']],
+        'stripe' => ['name' => 'Stripe', 'fields' => ['secret_key','webhook_secret']],
     ];
     private array $adapters;
     private Closure $credentialLoader;
@@ -53,7 +58,7 @@ final class ShopPaymentProviderRegistry
     {
         $this->adapters = $adapters ?? [
             'paypal' => new ShopUnconnectedProviderAdapter(),
-            'stripe' => new ShopUnconnectedProviderAdapter(),
+            'stripe' => new StripeTestAdapter(),
         ];
         if (array_keys($this->adapters) !== array_keys(self::PROVIDERS)) {
             throw new DomainException('Only the fixed PayPal and Stripe registry is supported.');
@@ -101,6 +106,9 @@ final class ShopPaymentProviderRegistry
         $configured = true;
         foreach (self::PROVIDERS[$provider]['fields'] as $field) {
             if (!isset($credentials[$field]) || !is_string($credentials[$field]) || trim($credentials[$field]) === '') $configured = false;
+        }
+        if ($this->adapters[$provider] instanceof ShopProviderConfigurationPolicy) {
+            $configured = $this->adapters[$provider]->configuredForMode($credentials, $mode);
         }
         $enabled = (int)($setting['enabled'] ?? 0) === 1;
         $ready = $this->adapters[$provider]->ready();
@@ -154,6 +162,13 @@ final class ShopPaymentProviderRegistry
     public function processCallback(PDO $pdo, string $provider, string $payload, array $headers): array
     {
         $this->validateProvider($provider);
+        if ($this->adapters[$provider] instanceof ShopAttemptBoundProviderAdapter) {
+            $adapter = $this->adapters[$provider];
+            $verified = $adapter->verifyCallback($payload, $headers, $this->credentials($provider, $adapter->callbackMode()));
+            $adapter->validateBinding($pdo, $verified);
+            return shop_payment_process_verified_event($pdo, $verified->paymentId, $provider, $verified->eventId,
+                $verified->eventType, $verified->status, $verified->amount, $verified->currency, $verified->captureId, $verified->failureCode);
+        }
         $setting = null;
         foreach ($this->settings($pdo) as $candidate) if ($candidate['key'] === $provider) $setting = $candidate;
         if (!$setting || !$setting['available']) throw new DomainException('Provider is unavailable.');
@@ -161,5 +176,12 @@ final class ShopPaymentProviderRegistry
         return shop_payment_process_verified_event($pdo, $verified->paymentId, $provider, $verified->eventId,
             $verified->eventType, $verified->status, $verified->amount, $verified->currency,
             $verified->captureId, $verified->failureCode);
+    }
+
+    public function createBoundSession(array $payment): array
+    {
+        $provider = $this->validateProvider($payment['provider'] ?? null);
+        $mode = $this->validateMode($payment['provider_mode'] ?? null);
+        return $this->adapters[$provider]->createSession($payment, $this->credentials($provider, $mode));
     }
 }

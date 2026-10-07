@@ -61,8 +61,35 @@ require __DIR__ . '/shop_products.php';
 require __DIR__ . '/shop_checkout.php';
 require __DIR__ . '/shop_payments.php';
 require __DIR__ . '/shop_payment_providers.php';
+require __DIR__ . '/shop_stripe_checkout.php';
 
 $action = $_GET['action'] ?? 'projects';
+
+if (in_array($action, ['stripe-checkout-session','payment-order-state'], true)) {
+    header('Cache-Control: no-store, max-age=0');
+    try {
+        if ($action === 'stripe-checkout-session') {
+            require_post();
+            if ($_FILES || array_diff(array_keys($_POST), ['orderId','csrfToken'])) throw new DomainException('Only order identity is accepted; amounts are server-owned.');
+            $orderId = shop_stripe_owned_order_id($_POST['orderId'] ?? null, $_SESSION);
+            $csrf = $_POST['csrfToken'] ?? null;
+            if (!is_string($csrf) || empty($_SESSION['checkout_payment_csrf']) || !hash_equals($_SESSION['checkout_payment_csrf'],$csrf)) {
+                json_response(['error'=>'Refresh Checkout before starting payment.'],403);
+            }
+            session_write_close(); // Stripe requests do not block this browser's state checks.
+            json_response(['session'=>shop_stripe_start(db(),new ShopPaymentProviderRegistry(),$orderId)]);
+        }
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') json_response(['error'=>'Method not allowed.'],405);
+        $orderId = shop_stripe_owned_order_id($_GET['orderId'] ?? null,$_SESSION);
+        json_response(['state'=>shop_stripe_order_state(db(),$orderId)]);
+    } catch (DomainException) {
+        json_response(['error'=>'This order or payment request is not eligible in your checkout session.'],422);
+    } catch (ShopStripeUnavailable $error) {
+        json_response(['error'=>$error->getMessage()],503);
+    } catch (Throwable) {
+        json_response(['error'=>'Card payment could not be opened. Retry safely; the order remains unpaid.'],503);
+    }
+}
 
 if (in_array($action, ['admin-payment-providers','save-payment-provider','payment-providers'], true)) {
     header('Cache-Control: no-store, max-age=0');
@@ -437,7 +464,10 @@ if ($action === 'checkout-quote') {
 
 if ($action === 'checkout-order') {
     require_post();
-    json_response(['order' => shop_checkout_create_order(db(), $_POST)], 201);
+    $order = shop_checkout_create_order(db(), $_POST);
+    $_SESSION['checkout_order_bindings'][$order['id']] = hash('sha256',(string)$_POST['attemptToken']);
+    $_SESSION['checkout_payment_csrf'] ??= bin2hex(random_bytes(32));
+    json_response(['order'=>$order, 'paymentCsrfToken'=>$_SESSION['checkout_payment_csrf']],201);
 }
 
 if ($action === 'order') {
